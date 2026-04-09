@@ -6,6 +6,7 @@ pub mod config;
 pub mod inference;
 pub mod json;
 pub mod sampler;
+pub mod sysconfig;
 pub mod tokenizer;
 pub mod weights;
 
