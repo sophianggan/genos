@@ -94,8 +94,10 @@ impl Repl {
 
             pos += 1;
 
-            // If we're past the prompt, print the generated token
-            if pos > num_prompt_tokens {
+            // Print as soon as we've consumed the full prompt.
+            // pos > num_prompt_tokens - 1 means we've processed all prompt tokens
+            // and next_token is a freshly sampled (generated) token.
+            if pos >= num_prompt_tokens {
                 let piece = self.tokenizer.decode(token, next_token);
                 screen::print(piece);
             }
