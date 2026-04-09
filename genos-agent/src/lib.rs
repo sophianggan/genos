@@ -5,4 +5,5 @@ extern crate alloc;
 pub mod compact;
 pub mod policy;
 pub mod repl;
+pub mod tools;
 pub mod wakeup;
