@@ -69,7 +69,8 @@ impl Transformer {
 
     /// Run one forward pass for a single token at the given position.
     /// Returns a reference to the logits (vocab_size floats).
-    pub fn forward(&mut self, token: usize, pos: usize) -> &[f32] {
+    pub fn forward(&mut self, token: u32, pos: usize) -> &[f32] {
+        let token = token as usize;
         let cfg = self.config;
         let dim = cfg.dim;
         let kv_dim = cfg.kv_dim();

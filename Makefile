@@ -30,7 +30,7 @@ OVMF_CODE ?= $(shell \
 # This is slower than native but fully functional for UEFI development and testing.
 # Install with: brew install qemu  (brings OVMF firmware automatically)
 
-.PHONY: build build-debug esp qemu qemu-debug qemu-nographic clean help setup-model
+.PHONY: build build-debug esp qemu qemu-debug qemu-net qemu-nographic clean help setup-model
 
 ## Build in release mode (default — much faster in QEMU emulation)
 build:
@@ -45,7 +45,7 @@ esp: build
 	@mkdir -p $(ESP_DIR)/EFI/BOOT
 	@mkdir -p $(ESP_DIR)/models
 	@mkdir -p $(ESP_DIR)/system
-	@mkdir -p $(ESP_DIR)/memory
+	@mkdir -p $(ESP_DIR)/palace
 	@mkdir -p $(ESP_DIR)/logs
 	@mkdir -p $(ESP_DIR)/data
 	@cp $(EFI_BINARY) $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
@@ -82,6 +82,21 @@ qemu-debug:
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
 		-m 512M \
 		-net none \
+		-serial stdio
+
+## Run in QEMU with user-mode networking (for Phase B HTTP HAL testing)
+## Exposes host port 8080 inside the VM as port 80; adds e1000 NIC.
+qemu-net: esp
+	@if [ "$(OVMF_CODE)" = "OVMF_NOT_FOUND" ]; then \
+		echo "ERROR: OVMF firmware not found."; \
+		exit 1; \
+	fi
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+		-drive format=raw,file=fat:rw:$(ESP_DIR) \
+		-m 512M \
+		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
+		-device e1000,netdev=net0 \
 		-serial stdio
 
 ## Run in QEMU without graphics (serial console only)
@@ -124,7 +139,8 @@ help:
 	@echo "  make release        - Build in release mode"
 	@echo "  make esp            - Create ESP directory with binary"
 	@echo "  make setup-model    - Download Stories15M model + tokenizer"
-	@echo "  make qemu           - Run in QEMU (graphical)"
+	@echo "  make qemu           - Run in QEMU (graphical, no network)"
+	@echo "  make qemu-net       - Run in QEMU with user-mode networking (Phase B)"
 	@echo "  make qemu-nographic - Run in QEMU (serial only)"
 	@echo "  make test           - Run host-mode unit tests"
 	@echo "  make clean          - Clean all artifacts"

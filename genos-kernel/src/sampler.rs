@@ -47,9 +47,9 @@ impl Sampler {
 
     /// Sample a token from the logits distribution.
     /// Modifies logits in-place (temperature scaling + softmax).
-    pub fn sample(&mut self, logits: &mut [f32]) -> usize {
+    pub fn sample(&mut self, logits: &mut [f32]) -> u32 {
         if self.temperature == 0.0 {
-            return argmax(logits);
+            return argmax(logits) as u32;
         }
 
         // Apply temperature
@@ -63,9 +63,9 @@ impl Sampler {
 
         // Top-p sampling
         if self.topp > 0.0 && self.topp < 1.0 {
-            self.sample_topp(logits)
+            self.sample_topp(logits) as u32
         } else {
-            self.sample_multinomial(logits)
+            self.sample_multinomial(logits) as u32
         }
     }
 

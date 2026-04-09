@@ -73,11 +73,11 @@ impl Repl {
     }
 
     /// Generate tokens given a prompt token sequence.
-    fn generate(&mut self, prompt_tokens: &[usize]) {
+    fn generate(&mut self, prompt_tokens: &[u32]) {
         let num_prompt_tokens = prompt_tokens.len();
-        let mut token = prompt_tokens[0];
+        let mut token: u32 = prompt_tokens[0];
         let mut pos = 0usize;
-        let mut next_token: usize;
+        let mut next_token: u32;
 
         while pos < self.max_seq_len {
             // Forward pass
@@ -103,7 +103,7 @@ impl Repl {
             }
 
             // Stop on EOS token (token 2) or if we hit a special token
-            if next_token == 2 {
+            if next_token == 2u32 {
                 break;
             }
 

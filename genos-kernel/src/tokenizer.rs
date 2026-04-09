@@ -56,8 +56,9 @@ impl Tokenizer {
     }
 
     /// Encode a string into a sequence of token IDs using BPE.
-    pub fn encode(&self, text: &str, bos: bool, eos: bool) -> Vec<usize> {
-        let mut tokens = Vec::new();
+    pub fn encode(&self, text: &str, bos: bool, eos: bool) -> Vec<u32> {
+        // Use usize internally for vocab indexing; convert to u32 at the boundary.
+        let mut tokens: Vec<usize> = Vec::new();
 
         if bos {
             tokens.push(1); // BOS token
@@ -120,14 +121,14 @@ impl Tokenizer {
             tokens.push(2); // EOS token
         }
 
-        tokens
+        tokens.into_iter().map(|t| t as u32).collect()
     }
 
     /// Decode a single token to its string representation.
     /// Handles byte fallback tokens like <0xNN>.
     /// Strips leading space if previous token was BOS (token 1).
-    pub fn decode(&self, prev_token: usize, token: usize) -> &str {
-        let piece = &self.vocab[token];
+    pub fn decode(&self, prev_token: u32, token: u32) -> &str {
+        let piece = &self.vocab[token as usize];
 
         // Handle byte fallback tokens
         if piece.starts_with("<0x") && piece.ends_with('>') && piece.len() == 6 {
