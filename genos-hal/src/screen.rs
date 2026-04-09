@@ -155,3 +155,67 @@ pub fn print_status(status: &str) {
     print(status);
     reset_color();
 }
+
+/// TUI status bar — renders a persistent footer at the bottom of the screen.
+/// Format: [model] | tok/s | RAM used/totalMB | turns: N | uptime: HH:MM:SS
+pub fn render_status_bar(
+    model: &str,
+    tokens_per_sec: f64,
+    ram_used_mb: usize,
+    ram_total_mb: usize,
+    turns: usize,
+    uptime_secs: u64,
+) {
+    // Get screen dimensions
+    let (cols, rows) = get_screen_size();
+    if rows == 0 || cols == 0 {
+        return;
+    }
+
+    // Save cursor position — move to bottom row
+    // UEFI SimpleTextOutput: set cursor position
+    system::with_stdout(|stdout| {
+        let _ = stdout.set_cursor_position(0, rows - 1);
+    });
+
+    // Format uptime
+    let hours = uptime_secs / 3600;
+    let mins = (uptime_secs % 3600) / 60;
+    let secs = uptime_secs % 60;
+
+    // Build status line
+    let tok_s_int = tokens_per_sec as u64;
+    let status = alloc::format!(
+        " [{}] | {} tok/s | RAM {}/{}MB | turns: {} | uptime: {:02}:{:02}:{:02} ",
+        model, tok_s_int, ram_used_mb, ram_total_mb, turns, hours, mins, secs
+    );
+
+    // Pad to fill width
+    let pad_len = if cols > status.len() { cols - status.len() } else { 0 };
+
+    set_color(Color::White, Color::Blue);
+    print(&status);
+    for _ in 0..pad_len {
+        print(" ");
+    }
+    reset_color();
+
+    // Restore cursor to previous position (move up one from bottom)
+    // We can't truly save/restore, so just move to bottom - 2
+    system::with_stdout(|stdout| {
+        if rows > 2 {
+            let _ = stdout.set_cursor_position(0, rows - 2);
+        }
+    });
+}
+
+/// Get screen dimensions (columns, rows).
+pub fn get_screen_size() -> (usize, usize) {
+    system::with_stdout(|stdout| {
+        let mode = stdout.current_mode();
+        match mode {
+            Ok(Some(m)) => (m.columns(), m.rows()),
+            _ => (80, 25), // Default fallback
+        }
+    })
+}

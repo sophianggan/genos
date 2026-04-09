@@ -237,6 +237,18 @@ impl Repl {
             // Advance cooperative clock
             timer::advance_ms(100);
 
+            // Step 13: TUI status bar
+            let uptime = timer::now_ms() / 1000;
+            let mem = timer::get_memory_info();
+            screen::render_status_bar(
+                "stories15m",
+                0.0, // tokens/sec computed in Phase D
+                (mem.total_kb.saturating_sub(mem.free_kb) / 1024) as usize,
+                (mem.total_kb / 1024) as usize,
+                state.turn,
+                uptime,
+            );
+
             screen::println("");
         }
     }
