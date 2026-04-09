@@ -3,6 +3,7 @@
 extern crate alloc;
 
 pub mod fs;
+pub mod graph;
 pub mod journal;
 pub mod memory;
 pub mod net;

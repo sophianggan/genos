@@ -213,6 +213,26 @@ impl ToolRegistry {
             params: &[("entry_id", "entry ID (format: session:turn)")],
         });
         reg.register(ToolSpec {
+            name: "memory.graph_add",
+            description: "Add a triple to the entity graph",
+            params: &[("entity_a", "subject entity"), ("relation", "relationship"), ("entity_b", "object entity")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.graph_query",
+            description: "Query entity relationships (optionally at a point in time)",
+            params: &[("entity", "entity to query"), ("as_of", "optional ISO 8601 timestamp")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.graph_invalidate",
+            description: "Invalidate a triple (set valid_until to now)",
+            params: &[("entity_a", "subject"), ("relation", "relationship"), ("entity_b", "object")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.graph_timeline",
+            description: "Get chronological history of an entity",
+            params: &[("entity", "entity to get timeline for")],
+        });
+        reg.register(ToolSpec {
             name: "sys.clock",
             description: "Get current wall-clock time",
             params: &[],

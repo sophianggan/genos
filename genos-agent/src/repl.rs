@@ -9,6 +9,7 @@ use genos_kernel::tokenizer::Tokenizer;
 use genos_tools::journal;
 use genos_tools::palace;
 use genos_tools::protocol::ToolCall;
+use genos_tools::graph::EntityGraph;
 use genos_tools::search::SearchIndex;
 use crate::compact::ContextHistory;
 use crate::policy::PolicyEngine;
@@ -77,6 +78,8 @@ impl Repl {
         let mut history = ContextHistory::new(&session_id);
         let mut policy = PolicyEngine::new();
         let mut search_index = SearchIndex::new();
+        let mut entity_graph = EntityGraph::new();
+        entity_graph.load();
 
         screen::println("");
         screen::println("genos v0.1.0 — bare-metal LLM operating system");
@@ -157,7 +160,7 @@ impl Repl {
                     policy.reset_turn();
 
                     // Execute
-                    let result = tools::execute(&tc, &mut policy, &timestamp, state.turn, &mut search_index);
+                    let result = tools::execute(&tc, &mut policy, &timestamp, state.turn, &mut search_index, &mut entity_graph);
 
                     // Display result
                     let result_summary = if result.ok {

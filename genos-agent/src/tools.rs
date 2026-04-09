@@ -6,6 +6,7 @@
 use genos_hal::timer;
 use genos_kernel::json::JsonValue;
 use genos_tools::protocol::{ToolCall, ToolResult};
+use genos_tools::graph::EntityGraph;
 use genos_tools::search::SearchIndex;
 use crate::policy::{PolicyCheck, PolicyEngine};
 
@@ -16,6 +17,7 @@ pub fn execute(
     timestamp: &str,
     turn: usize,
     index: &mut SearchIndex,
+    graph: &mut EntityGraph,
 ) -> ToolResult {
     // Check policy
     match policy.check(&call.tool) {
@@ -55,7 +57,7 @@ pub fn execute(
     // Dispatch to handler
     let mut result = dispatch(
         &call.tool, &call.args, &call.call_id, timestamp,
-        &call.session_id, turn, index,
+        &call.session_id, turn, index, graph,
     );
 
     // Set elapsed time
@@ -74,6 +76,7 @@ fn dispatch(
     session_id: &str,
     turn: usize,
     index: &mut SearchIndex,
+    graph: &mut EntityGraph,
 ) -> ToolResult {
     match tool {
         "fs.read" => genos_tools::fs::tool_read(args, call_id),
@@ -94,6 +97,10 @@ fn dispatch(
         "memory.search" => genos_tools::memory::tool_search(args, call_id, turn, index),
         "memory.consolidate" => genos_tools::memory::tool_consolidate(args, call_id, session_id, timestamp),
         "memory.forget" => genos_tools::memory::tool_forget(args, call_id),
+        "memory.graph_add" => genos_tools::graph::tool_graph_add(args, call_id, timestamp, graph),
+        "memory.graph_query" => genos_tools::graph::tool_graph_query(args, call_id, graph),
+        "memory.graph_invalidate" => genos_tools::graph::tool_graph_invalidate(args, call_id, timestamp, graph),
+        "memory.graph_timeline" => genos_tools::graph::tool_graph_timeline(args, call_id, graph),
         "sys.clock" => genos_tools::sys::tool_clock(args, call_id),
         "sys.introspect" => genos_tools::sys::tool_introspect(args, call_id),
         _ => ToolResult::failure(
