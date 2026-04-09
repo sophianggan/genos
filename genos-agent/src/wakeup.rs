@@ -14,6 +14,7 @@ use alloc::string::String;
 use alloc::format;
 use genos_tools::palace;
 use genos_tools::protocol::ToolRegistry;
+use genos_tools::search::SearchIndex;
 use genos_tools::sys::format_status_header;
 
 /// The assembled system prompt, ready for injection into every turn.
@@ -63,6 +64,12 @@ impl WakeUpState {
 ///
 /// Call this once at boot after `palace::ensure_structure()`.
 pub fn load(session_id: &str) -> WakeUpState {
+    load_with_continuity(session_id, None)
+}
+
+/// Load wake-up state with cross-session continuity.
+/// If a search index is provided, searches for last session context.
+pub fn load_with_continuity(session_id: &str, index: Option<&SearchIndex>) -> WakeUpState {
     // Step 1: Read identity (L0)
     let identity = palace::read_identity();
 
@@ -85,13 +92,37 @@ pub fn load(session_id: &str) -> WakeUpState {
     let registry = ToolRegistry::default_registry();
     let manifest = registry.manifest();
 
-    // Step 4: Assemble system prompt
+    // Step 4: Cross-session continuity — search for last session context
+    let continuity = if let Some(idx) = index {
+        let results = idx.search("last session summary context", None, None, 2, 0);
+        if results.is_empty() {
+            String::new()
+        } else {
+            let mut ctx = String::from("\nLast session context:\n");
+            for r in &results {
+                // Truncate to avoid context bloat
+                let text = if r.text.len() > 200 {
+                    &r.text[..200]
+                } else {
+                    &r.text
+                };
+                ctx.push_str("- ");
+                ctx.push_str(text);
+                ctx.push('\n');
+            }
+            ctx
+        }
+    } else {
+        String::new()
+    };
+
+    // Step 5: Assemble system prompt
     let system_prompt = format!(
-        "{}\n\nKnown facts:\n{}\n\n{}\n\
+        "{}\n\nKnown facts:\n{}\n{}\n{}\n\
          When you want to use a tool, emit the JSON on its own line.\n\
          After receiving the result, continue your response.\n\
          Always respond helpfully and concisely.",
-        identity, facts, manifest
+        identity, facts, continuity, manifest
     );
 
     WakeUpState {

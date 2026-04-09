@@ -82,6 +82,7 @@ impl Repl {
         let mut entity_graph = EntityGraph::new();
         entity_graph.load();
         let mut consolidator = Consolidator::new();
+        let mut input_history = keyboard::InputHistory::new(10);
 
         screen::println("");
         screen::println("genos v0.1.0 — bare-metal LLM operating system");
@@ -91,7 +92,7 @@ impl Repl {
         // --- Main agent loop ---
         loop {
             screen::print("genos> ");
-            let input = keyboard::read_line();
+            let input = keyboard::read_line_with_history(&mut input_history);
             let trimmed = input.trim();
 
             if trimmed.is_empty() {
