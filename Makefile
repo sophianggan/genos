@@ -45,11 +45,23 @@ esp: build
 	@mkdir -p $(ESP_DIR)/EFI/BOOT
 	@mkdir -p $(ESP_DIR)/models
 	@mkdir -p $(ESP_DIR)/system
-	@mkdir -p $(ESP_DIR)/palace
-	@mkdir -p $(ESP_DIR)/logs
-	@mkdir -p $(ESP_DIR)/data
+	@mkdir -p $(ESP_DIR)/palace/wings/general/halls/facts
+	@mkdir -p $(ESP_DIR)/palace/wings/general/halls/events
+	@mkdir -p $(ESP_DIR)/palace/wings/general/halls/discoveries
+	@mkdir -p $(ESP_DIR)/palace/wings/general/halls/preferences
+	@mkdir -p $(ESP_DIR)/palace/wings/general/halls/advice
+	@mkdir -p $(ESP_DIR)/palace/sessions
 	@cp $(EFI_BINARY) $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
-	@if [ -f resources/prompt.txt ]; then cp resources/prompt.txt $(ESP_DIR)/system/prompt.txt; fi
+	@if [ -f resources/identity.txt ] && [ ! -f $(ESP_DIR)/palace/identity.txt ]; then \
+		cp resources/identity.txt $(ESP_DIR)/palace/identity.txt; \
+	fi
+	@if [ -f resources/config.toml ] && [ ! -f $(ESP_DIR)/system/config.toml ]; then \
+		cp resources/config.toml $(ESP_DIR)/system/config.toml; \
+	fi
+	@if [ ! -f $(ESP_DIR)/palace/facts.kv ]; then \
+		cp resources/facts.kv $(ESP_DIR)/palace/facts.kv 2>/dev/null || \
+		echo "os_version = genos v0.1.0" > $(ESP_DIR)/palace/facts.kv; \
+	fi
 	@echo "ESP created at $(ESP_DIR)/"
 	@echo ""
 	@echo "Before running, place model files in $(ESP_DIR)/models/:"

@@ -1,0 +1,21 @@
+# genos system configuration
+# Loaded at boot from \system\config.toml
+
+[sampling]
+temperature = 1.0
+top_p = 0.9
+
+[context]
+# Maximum context budget in tokens (Stories15M: 256)
+budget = 256
+# Pre-compact threshold (percentage of budget)
+compact_threshold = 80
+
+[model]
+name = "stories15m"
+path = "\\models\\stories15m.bin"
+tokenizer_path = "\\models\\tokenizer.bin"
+
+[system]
+version = "0.1.0"
+phase = "B"
