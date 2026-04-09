@@ -12,6 +12,7 @@ use genos_tools::protocol::ToolCall;
 use genos_tools::graph::EntityGraph;
 use genos_tools::search::SearchIndex;
 use crate::compact::ContextHistory;
+use crate::consolidate::Consolidator;
 use crate::policy::PolicyEngine;
 use crate::tools;
 use crate::wakeup;
@@ -80,6 +81,7 @@ impl Repl {
         let mut search_index = SearchIndex::new();
         let mut entity_graph = EntityGraph::new();
         entity_graph.load();
+        let mut consolidator = Consolidator::new();
 
         screen::println("");
         screen::println("genos v0.1.0 — bare-metal LLM operating system");
@@ -215,6 +217,21 @@ impl Repl {
 
             // Step 11: Update turn counter
             state.advance_turn(approx_tokens);
+
+            // Step 12: Run consolidation if due
+            if consolidator.should_run(state.turn) {
+                let ts = timer::get_wall_time()
+                    .map(|wt| wt.iso8601())
+                    .unwrap_or_else(|| String::from("unknown"));
+                let (extracted, updated, archived) =
+                    consolidator.run(&session_id, state.turn, &ts, &mut search_index);
+                if extracted > 0 || archived > 0 {
+                    screen::println(&format!(
+                        "[consolidate] {} facts extracted, {} updated, {} archived",
+                        extracted, updated, archived
+                    ));
+                }
+            }
 
             // Advance cooperative clock
             timer::advance_ms(100);
