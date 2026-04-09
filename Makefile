@@ -147,12 +147,12 @@ clean:
 ## Show help
 help:
 	@echo "genos build targets:"
-	@echo "  make build          - Build the UEFI binary"
-	@echo "  make release        - Build in release mode"
-	@echo "  make esp            - Create ESP directory with binary"
+	@echo "  make build          - Build the UEFI binary (release)"
+	@echo "  make build-debug    - Build the UEFI binary (debug)"
+	@echo "  make esp            - Create ESP directory with binary + palace"
 	@echo "  make setup-model    - Download Stories15M model + tokenizer"
 	@echo "  make qemu           - Run in QEMU (graphical, no network)"
-	@echo "  make qemu-net       - Run in QEMU with user-mode networking (Phase B)"
+	@echo "  make qemu-net       - Run in QEMU with networking (Phase B)"
 	@echo "  make qemu-nographic - Run in QEMU (serial only)"
 	@echo "  make test           - Run host-mode unit tests"
 	@echo "  make clean          - Clean all artifacts"
