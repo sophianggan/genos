@@ -1,0 +1,8 @@
+[package]
+name = "genos-hal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uefi = { version = "0.37", features = ["alloc"] }
+log = "0.4"
