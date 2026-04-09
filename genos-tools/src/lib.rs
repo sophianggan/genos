@@ -5,5 +5,6 @@ extern crate alloc;
 pub mod fs;
 pub mod journal;
 pub mod memory;
+pub mod net;
 pub mod palace;
 pub mod protocol;
