@@ -101,6 +101,9 @@ fn dispatch(
         "memory.graph_query" => genos_tools::graph::tool_graph_query(args, call_id, graph),
         "memory.graph_invalidate" => genos_tools::graph::tool_graph_invalidate(args, call_id, timestamp, graph),
         "memory.graph_timeline" => genos_tools::graph::tool_graph_timeline(args, call_id, graph),
+        "palace.create_wing" => genos_tools::palace::tool_create_wing(args, call_id),
+        "palace.list_wings" => genos_tools::palace::tool_list_wings(args, call_id),
+        "palace.find_tunnels" => genos_tools::palace::tool_find_tunnels(args, call_id),
         "sys.clock" => genos_tools::sys::tool_clock(args, call_id),
         "sys.introspect" => genos_tools::sys::tool_introspect(args, call_id),
         _ => ToolResult::failure(

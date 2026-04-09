@@ -233,6 +233,21 @@ impl ToolRegistry {
             params: &[("entity", "entity to get timeline for")],
         });
         reg.register(ToolSpec {
+            name: "palace.create_wing",
+            description: "Create a named wing (project or person) in the palace",
+            params: &[("name", "wing name"), ("wing_type", "project or person")],
+        });
+        reg.register(ToolSpec {
+            name: "palace.list_wings",
+            description: "List all wings in the palace",
+            params: &[],
+        });
+        reg.register(ToolSpec {
+            name: "palace.find_tunnels",
+            description: "Find cross-wing tunnels (shared halls between wings)",
+            params: &[],
+        });
+        reg.register(ToolSpec {
             name: "sys.clock",
             description: "Get current wall-clock time",
             params: &[],
