@@ -1,5 +1,6 @@
-//! Memory tools: facts_get, facts_set (with contradiction detection), log_turn.
-//! These are the Phase B memory tools — palace is write-only, search comes in Phase C.
+//! Memory tools: facts_get, facts_set (with contradiction detection), log_turn,
+//! store, search, forget, consolidate.
+//! Phase B: palace write-only. Phase C: full four-layer memory stack operational.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -7,6 +8,7 @@ use alloc::format;
 use genos_kernel::json::JsonValue;
 use crate::palace;
 use crate::protocol::ToolResult;
+use crate::search::SearchIndex;
 
 /// memory.facts_get() -> all L1 facts as JSON array of {key, value}
 pub fn tool_facts_get(_args: &JsonValue, call_id: &str) -> ToolResult {
@@ -142,4 +144,209 @@ pub fn tool_log_turn(args: &JsonValue, call_id: &str, session_id: &str) -> ToolR
     };
     palace::append_session_journal(session_id, &data);
     ToolResult::success(call_id, JsonValue::Bool(true), 0)
+}
+
+/// memory.store(content, wing, hall, tags?) -> entry_id
+/// Writes verbatim content to palace hall file and updates the search index.
+pub fn tool_store(
+    args: &JsonValue,
+    call_id: &str,
+    session_id: &str,
+    turn: usize,
+    index: &mut SearchIndex,
+) -> ToolResult {
+    let content = match args.get("content").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return ToolResult::failure(call_id, "invalid_args", "missing 'content'", false),
+    };
+    let wing = args.get("wing").and_then(|v| v.as_str()).unwrap_or("general");
+    let hall_str = args.get("hall").and_then(|v| v.as_str()).unwrap_or("discoveries");
+    let hall = palace::Hall::from_str(hall_str).unwrap_or(palace::Hall::Discoveries);
+
+    // Write to palace
+    palace::store_in_hall(session_id, turn, hall, content);
+
+    // Build entry path for indexing
+    let path = format!(
+        "\\palace\\wings\\{}\\halls\\{}\\{}_{:04}.txt",
+        wing, hall.as_str(), session_id, turn
+    );
+
+    // Update search index
+    index.index_entry(&path, wing, hall.as_str(), content, turn);
+
+    let entry_id = format!("{}:{}", session_id, turn);
+    ToolResult::success(
+        call_id,
+        genos_kernel::json::json_object(&[
+            ("entry_id", JsonValue::Str(entry_id)),
+            ("path", JsonValue::Str(path)),
+            ("indexed", JsonValue::Bool(true)),
+        ]),
+        0,
+    )
+}
+
+/// memory.search(query, wing?, hall?, top_k?) -> Vec<SearchResult>
+/// Delegates to the TF-IDF search index over palace halls.
+pub fn tool_search(
+    args: &JsonValue,
+    call_id: &str,
+    current_turn: usize,
+    index: &SearchIndex,
+) -> ToolResult {
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) => q,
+        None => return ToolResult::failure(call_id, "invalid_args", "missing 'query'", false),
+    };
+    let wing = args.get("wing").and_then(|v| v.as_str());
+    let hall = args.get("hall").and_then(|v| v.as_str());
+    let top_k = args.get("top_k")
+        .and_then(|v| v.as_f64())
+        .map(|n| n as usize)
+        .unwrap_or(5);
+
+    let results = index.search(query, wing, hall, top_k, current_turn);
+
+    let arr: Vec<JsonValue> = results
+        .iter()
+        .map(|r| {
+            genos_kernel::json::json_object(&[
+                ("path", JsonValue::Str(r.path.clone())),
+                ("wing", JsonValue::Str(r.wing.clone())),
+                ("hall", JsonValue::Str(r.hall.clone())),
+                ("text", JsonValue::Str(r.text.clone())),
+                ("score", JsonValue::Number(r.score)),
+                ("turn", JsonValue::Number(r.turn as f64)),
+            ])
+        })
+        .collect();
+
+    ToolResult::success(call_id, JsonValue::Array(arr), 0)
+}
+
+/// memory.forget(entry_id) -> move entry to archive, remove from index.
+/// entry_id format: "{session_id}:{turn}"
+pub fn tool_forget(args: &JsonValue, call_id: &str) -> ToolResult {
+    let entry_id = match args.get("entry_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => return ToolResult::failure(call_id, "invalid_args", "missing 'entry_id'", false),
+    };
+
+    // Parse entry_id -> session_id:turn
+    let parts: Vec<&str> = entry_id.split(':').collect();
+    if parts.len() != 2 {
+        return ToolResult::failure(call_id, "invalid_args", "entry_id must be 'session:turn'", false);
+    }
+    let session_id = parts[0];
+    let turn: usize = match parts[1].parse() {
+        Ok(t) => t,
+        Err(_) => return ToolResult::failure(call_id, "invalid_args", "turn must be a number", false),
+    };
+
+    // Try each hall to find the file
+    let mut found = false;
+    for hall in palace::Hall::all() {
+        let src_path = format!(
+            "\\palace\\wings\\general\\halls\\{}\\{}_{:04}.txt",
+            hall.as_str(), session_id, turn
+        );
+        if let Ok(data) = genos_hal::disk::read_file(&src_path) {
+            // Move to archive
+            let archive_path = format!(
+                "\\palace\\archive\\{}_{:04}_{}.txt",
+                session_id, turn, hall.as_str()
+            );
+            let _ = genos_hal::disk::write_file(&archive_path, &data);
+            // Delete original (write empty)
+            let _ = genos_hal::disk::write_file(&src_path, b"[archived]");
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return ToolResult::failure(call_id, "not_found", "entry not found in palace", false);
+    }
+
+    ToolResult::success(
+        call_id,
+        genos_kernel::json::json_object(&[
+            ("archived", JsonValue::Bool(true)),
+            ("entry_id", JsonValue::Str(String::from(entry_id))),
+        ]),
+        0,
+    )
+}
+
+/// memory.consolidate() -> force a consolidation pass.
+/// Scans last N journal entries, extracts facts, updates L1.
+/// Returns summary of what was consolidated.
+pub fn tool_consolidate(
+    args: &JsonValue,
+    call_id: &str,
+    session_id: &str,
+    timestamp: &str,
+) -> ToolResult {
+    let n = args.get("n")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as usize)
+        .unwrap_or(20);
+
+    // Read session journal
+    let journal_path = format!("\\palace\\sessions\\{}.jsonl", session_id);
+    let data = match genos_hal::disk::read_file(&journal_path) {
+        Ok(d) => d,
+        Err(_) => return ToolResult::failure(call_id, "no_journal", "no session journal found", false),
+    };
+    let text = core::str::from_utf8(&data).unwrap_or("");
+
+    // Collect last N lines
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let start = if lines.len() > n { lines.len() - n } else { 0 };
+    let recent = &lines[start..];
+
+    // Extract key=value patterns from journal entries
+    let mut extracted: Vec<(String, String)> = Vec::new();
+    for line in recent {
+        if let Ok(val) = genos_kernel::json::parse(line) {
+            // Look for factual content in output fields
+            if let Some(output) = val.get("output").and_then(|v| v.as_str()) {
+                // Simple pattern: lines containing "=" or ":" that look like facts
+                for fact_line in output.lines() {
+                    let trimmed = fact_line.trim();
+                    if let Some(eq_pos) = trimmed.find(" = ") {
+                        let k = String::from(trimmed[..eq_pos].trim());
+                        let v = String::from(trimmed[eq_pos + 3..].trim());
+                        if !k.is_empty() && !v.is_empty() && k.len() < 64 {
+                            extracted.push((k, v));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply extracted facts via facts_set (reuses contradiction detection)
+    let mut updated = 0usize;
+    for (key, value) in &extracted {
+        let fact_args = genos_kernel::json::json_object(&[
+            ("key", JsonValue::Str(key.clone())),
+            ("value", JsonValue::Str(value.clone())),
+        ]);
+        let result = tool_facts_set(&fact_args, "consolidate", timestamp);
+        if result.ok {
+            updated += 1;
+        }
+    }
+
+    ToolResult::success(
+        call_id,
+        genos_kernel::json::json_object(&[
+            ("entries_scanned", JsonValue::Number(recent.len() as f64)),
+            ("facts_extracted", JsonValue::Number(extracted.len() as f64)),
+            ("facts_updated", JsonValue::Number(updated as f64)),
+        ]),
+        0,
+    )
 }

@@ -193,6 +193,26 @@ impl ToolRegistry {
             params: &[("data", "turn data as JSON")],
         });
         reg.register(ToolSpec {
+            name: "memory.store",
+            description: "Store content in palace hall and index it",
+            params: &[("content", "text to store"), ("wing", "wing name (default: general)"), ("hall", "hall name (default: discoveries)"), ("tags", "optional tags")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.search",
+            description: "Search palace memory by query",
+            params: &[("query", "search query"), ("wing", "filter by wing"), ("hall", "filter by hall"), ("top_k", "max results (default: 5)")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.consolidate",
+            description: "Force consolidation: extract facts from recent journal entries",
+            params: &[("n", "number of recent entries to scan (default: 20)")],
+        });
+        reg.register(ToolSpec {
+            name: "memory.forget",
+            description: "Archive a memory entry, removing it from active palace",
+            params: &[("entry_id", "entry ID (format: session:turn)")],
+        });
+        reg.register(ToolSpec {
             name: "sys.clock",
             description: "Get current wall-clock time",
             params: &[],

@@ -9,6 +9,7 @@ use genos_kernel::tokenizer::Tokenizer;
 use genos_tools::journal;
 use genos_tools::palace;
 use genos_tools::protocol::ToolCall;
+use genos_tools::search::SearchIndex;
 use crate::compact::ContextHistory;
 use crate::policy::PolicyEngine;
 use crate::tools;
@@ -75,6 +76,7 @@ impl Repl {
         // Step 3: Initialize context history and policy
         let mut history = ContextHistory::new(&session_id);
         let mut policy = PolicyEngine::new();
+        let mut search_index = SearchIndex::new();
 
         screen::println("");
         screen::println("genos v0.1.0 — bare-metal LLM operating system");
@@ -155,7 +157,7 @@ impl Repl {
                     policy.reset_turn();
 
                     // Execute
-                    let result = tools::execute(&tc, &mut policy, &timestamp);
+                    let result = tools::execute(&tc, &mut policy, &timestamp, state.turn, &mut search_index);
 
                     // Display result
                     let result_summary = if result.ok {
