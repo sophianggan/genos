@@ -119,15 +119,37 @@ impl Repl {
 
             // Step 1: User input captured above
 
-            // Step 2: Build wake-up header
+            // Step 2: L2 auto-search — retrieve relevant palace entries before prompt assembly
+            let l2_context = {
+                let results = search_index.search(trimmed, None, None, 3, state.turn);
+                let mut ctx = String::new();
+                for r in &results {
+                    if r.score > 0.1 {
+                        let snippet = if r.text.len() > 150 { &r.text[..150] } else { &r.text };
+                        ctx.push_str("[memory] ");
+                        ctx.push_str(snippet);
+                        ctx.push('\n');
+                    }
+                }
+                ctx
+            };
+
+            // Step 3: Build wake-up header
             let header = state.status_header();
 
-            // Step 3: Build full prompt
-            // [system_prompt] [wake_up_header] [user_input]
-            let full_prompt = format!(
-                "{}\n{}\nUser: {}\nAssistant:",
-                state.system_prompt, header, trimmed
-            );
+            // Step 4: Build full prompt
+            // [system_prompt] [wake_up_header] [L2 context] [user_input]
+            let full_prompt = if l2_context.is_empty() {
+                format!(
+                    "{}\n{}\nUser: {}\nAssistant:",
+                    state.system_prompt, header, trimmed
+                )
+            } else {
+                format!(
+                    "{}\n{}\n{}\nUser: {}\nAssistant:",
+                    state.system_prompt, header, l2_context, trimmed
+                )
+            };
 
             // Reset transformer for fresh generation
             self.transformer.reset();

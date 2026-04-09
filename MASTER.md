@@ -4,7 +4,7 @@
 **The LLM *is* the OS.** Boot directly from USB via UEFI (no Linux, Windows, or BSD ever), load a quantized instruction model, and expose a TUI shell where the LLM makes every decision through structured tool calls, persistent memory, and agentic reasoning.
 
 **Repo**: https://github.com/n33levo/genos  
-**Status**: Phase A+B complete, Phase C in progress, D-E planned  
+**Status**: Phase A+B+C complete, D-E planned  
 **Stack**: Rust nightly · `x86_64-unknown-uefi` · `#![no_std]` + `core` + `alloc` · `uefi = "0.37"` · `libm = "0.2"`
 
 ---
@@ -418,7 +418,12 @@ pub mod tools;         // Tool registry and dispatcher
 
 ---
 
-### Phase C — Web Intelligence + Memory
+### ✅ Phase C — Web Intelligence + Memory (COMPLETE)
+
+All 11 deliverables implemented across 10 commits. ~1,500 LOC across 8 new/modified files.
+Key additions: full BPE tokenizer, TF-IDF search index, web intelligence (llms.txt-first),
+extended memory tools (store/search/consolidate/forget), temporal entity graph,
+consolidation pass, project wings + tunnels, cross-session continuity, input history, TUI status bar.
 
 **Goal**: Semantic search over the palace, web browsing, cross-session retrieval, consolidation pass, richer TUI. *Depends on Phase B. The palace directory structure and hall taxonomy already exist — Phase C indexes and searches it.*
 
