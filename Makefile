@@ -3,7 +3,7 @@
 
 CARGO = cargo
 TARGET = x86_64-unknown-uefi
-BUILD_DIR = target/$(TARGET)/debug
+BUILD_DIR = target/$(TARGET)/release
 EFI_BINARY = $(BUILD_DIR)/genos-boot.efi
 ESP_DIR = esp
 
@@ -30,15 +30,15 @@ OVMF_CODE ?= $(shell \
 # This is slower than native but fully functional for UEFI development and testing.
 # Install with: brew install qemu  (brings OVMF firmware automatically)
 
-.PHONY: build esp qemu qemu-nographic clean help setup-model
+.PHONY: build build-debug esp qemu qemu-debug qemu-nographic clean help setup-model
 
-## Build the UEFI binary
+## Build in release mode (default — much faster in QEMU emulation)
 build:
-	$(CARGO) build --target $(TARGET) -p genos-boot
-
-## Build in release mode
-release:
 	$(CARGO) build --target $(TARGET) -p genos-boot --release
+
+## Build debug binary (slow, for development only)
+build-debug:
+	$(CARGO) build --target $(TARGET) -p genos-boot
 
 ## Create the ESP (EFI System Partition) directory structure
 esp: build
@@ -58,7 +58,7 @@ esp: build
 	@echo ""
 	@echo "Download from: https://huggingface.co/karpathy/tinyllamas/tree/main"
 
-## Run in QEMU with OVMF (graphical)
+## Run in QEMU with OVMF (graphical, release build — fast)
 qemu: esp
 	@if [ "$(OVMF_CODE)" = "OVMF_NOT_FOUND" ]; then \
 		echo "ERROR: OVMF firmware not found."; \
@@ -66,7 +66,19 @@ qemu: esp
 		exit 1; \
 	fi
 	qemu-system-x86_64 \
-		-bios $(OVMF_CODE) \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+		-drive format=raw,file=fat:rw:$(ESP_DIR) \
+		-m 512M \
+		-net none \
+		-serial stdio
+
+## Run in QEMU with a debug build (slow, for debugging panics)
+qemu-debug:
+	$(CARGO) build --target $(TARGET) -p genos-boot
+	@mkdir -p $(ESP_DIR)/EFI/BOOT
+	cp target/$(TARGET)/debug/genos-boot.efi $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
 		-m 512M \
 		-net none \
@@ -79,7 +91,7 @@ qemu-nographic: esp
 		exit 1; \
 	fi
 	qemu-system-x86_64 \
-		-bios $(OVMF_CODE) \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
 		-m 512M \
 		-net none \
@@ -91,9 +103,9 @@ setup-model:
 	@echo "Downloading stories15M model..."
 	curl -L -o $(ESP_DIR)/models/stories15m.bin \
 		"https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin"
-	@echo "Downloading tokenizer..."
+	@echo "Downloading tokenizer (from llama2.c repo)..."
 	curl -L -o $(ESP_DIR)/models/tokenizer.bin \
-		"https://huggingface.co/karpathy/tinyllamas/resolve/main/tokenizer.bin"
+		"https://raw.githubusercontent.com/karpathy/llama2.c/master/tokenizer.bin"
 	@echo "Model files downloaded to $(ESP_DIR)/models/"
 
 ## Run host-mode tests (genos-kernel only, no UEFI dependency)
