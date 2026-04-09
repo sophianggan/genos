@@ -1,0 +1,12 @@
+[package]
+name = "genos-boot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uefi = { version = "0.37", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+log = "0.4"
+genos-hal = { path = "../genos-hal" }
+genos-kernel = { path = "../genos-kernel" }
+genos-tools = { path = "../genos-tools" }
+genos-agent = { path = "../genos-agent" }
