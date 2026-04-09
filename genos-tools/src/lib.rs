@@ -10,3 +10,4 @@ pub mod palace;
 pub mod protocol;
 pub mod search;
 pub mod sys;
+pub mod web;
