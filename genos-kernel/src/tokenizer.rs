@@ -12,7 +12,9 @@ use alloc::vec::Vec;
 pub struct Tokenizer {
     vocab: Vec<String>,
     scores: Vec<f32>,
+    #[allow(dead_code)]
     max_token_length: usize,
+    #[allow(dead_code)]
     vocab_size: usize,
 }
 

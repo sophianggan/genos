@@ -28,6 +28,7 @@ impl Rng {
 
 /// Token sampler with temperature and top-p (nucleus) sampling.
 pub struct Sampler {
+    #[allow(dead_code)]
     vocab_size: usize,
     temperature: f32,
     topp: f32,
