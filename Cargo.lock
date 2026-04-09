@@ -61,6 +61,7 @@ name = "genos-tools"
 version = "0.1.0"
 dependencies = [
  "genos-hal",
+ "genos-kernel",
 ]
 
 [[package]]
