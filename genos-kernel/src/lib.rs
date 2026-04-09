@@ -4,6 +4,7 @@ extern crate alloc;
 
 pub mod config;
 pub mod inference;
+pub mod json;
 pub mod sampler;
 pub mod tokenizer;
 pub mod weights;
