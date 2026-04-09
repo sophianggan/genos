@@ -1,21 +1,34 @@
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use alloc::format;
 
-/// BPE tokenizer compatible with the llama2.c tokenizer.bin format.
+/// BPE tokenizer supporting both llama2.c binary format and Hugging Face
+/// vocab.json + merges.txt format (needed for Gemma 4's 262k vocab in Phase D).
 ///
-/// File format:
+/// llama2.c format (Phase A/B):
 ///   max_token_length: i32
 ///   For each token (vocab_size total):
-///     score: f32
-///     len: i32
-///     bytes: [u8; len]
+///     score: f32, len: i32, bytes: [u8; len]
+///
+/// Hugging Face format (Phase C+):
+///   vocab.json: JSON object mapping token_string -> token_id
+///   merges.txt: one merge per line "token_a token_b"
 pub struct Tokenizer {
     vocab: Vec<String>,
     scores: Vec<f32>,
+    /// Reverse lookup: token string -> token id (for large vocabs).
+    vocab_index: BTreeMap<String, usize>,
     #[allow(dead_code)]
     max_token_length: usize,
     #[allow(dead_code)]
     vocab_size: usize,
+    /// BPE merge rules in priority order (from merges.txt).
+    /// Each entry is (token_a, token_b) -> merged rank (lower = higher priority).
+    #[allow(dead_code)]
+    merges: Vec<(String, String)>,
+    /// If true, merges take priority over scores for BPE.
+    use_merges: bool,
 }
 
 impl Tokenizer {
@@ -25,15 +38,24 @@ impl Tokenizer {
 
         // Need at least 4 bytes for the header
         if data.len() < 4 {
-            return Tokenizer { vocab: Vec::new(), scores: Vec::new(), max_token_length: 0, vocab_size };
+            return Tokenizer {
+                vocab: Vec::new(),
+                scores: Vec::new(),
+                vocab_index: BTreeMap::new(),
+                max_token_length: 0,
+                vocab_size,
+                merges: Vec::new(),
+                use_merges: false,
+            };
         }
 
         let max_token_length = read_i32(data, &mut offset) as usize;
 
         let mut vocab = Vec::with_capacity(vocab_size);
         let mut scores = Vec::with_capacity(vocab_size);
+        let mut vocab_index = BTreeMap::new();
 
-        for _ in 0..vocab_size {
+        for i in 0..vocab_size {
             // Each entry: f32 score + i32 len + len bytes
             if offset + 8 > data.len() { break; }
             let score = read_f32(data, &mut offset);
@@ -43,6 +65,7 @@ impl Tokenizer {
             offset += len;
 
             let s = String::from_utf8_lossy(bytes).into_owned();
+            vocab_index.insert(s.clone(), i);
             vocab.push(s);
             scores.push(score);
         }
@@ -50,8 +73,106 @@ impl Tokenizer {
         Tokenizer {
             vocab,
             scores,
+            vocab_index,
             max_token_length,
             vocab_size,
+            merges: Vec::new(),
+            use_merges: false,
+        }
+    }
+
+    /// Load tokenizer from Hugging Face vocab.json + merges.txt format.
+    ///
+    /// vocab.json: `{"token": id, ...}` — maps token strings to IDs.
+    /// merges.txt: one merge per line `"token_a token_b"`, first line may be `#version:`.
+    pub fn load_hf(vocab_json: &[u8], merges_txt: &[u8]) -> Self {
+        let vocab_str = core::str::from_utf8(vocab_json).unwrap_or("{}");
+        let merges_str = core::str::from_utf8(merges_txt).unwrap_or("");
+
+        // Parse vocab.json using our JSON parser
+        let vocab_val = match genos_kernel_json_parse(vocab_str) {
+            Some(v) => v,
+            None => {
+                return Self {
+                    vocab: Vec::new(),
+                    scores: Vec::new(),
+                    vocab_index: BTreeMap::new(),
+                    max_token_length: 0,
+                    vocab_size: 0,
+                    merges: Vec::new(),
+                    use_merges: false,
+                };
+            }
+        };
+
+        // Build vocab from JSON object {token: id}
+        let mut max_id: usize = 0;
+        let mut entries: Vec<(String, usize)> = Vec::new();
+
+        if let Some(obj) = vocab_val.as_object() {
+            for (token, id_val) in obj {
+                if let Some(id) = id_val.as_f64() {
+                    let id = id as usize;
+                    entries.push((token.clone(), id));
+                    if id > max_id {
+                        max_id = id;
+                    }
+                }
+            }
+        }
+
+        let vocab_size = max_id + 1;
+        let mut vocab = Vec::with_capacity(vocab_size);
+        let mut scores = Vec::with_capacity(vocab_size);
+        for _ in 0..vocab_size {
+            vocab.push(String::new());
+            scores.push(0.0f32);
+        }
+
+        let mut vocab_index = BTreeMap::new();
+        for (token, id) in &entries {
+            if *id < vocab_size {
+                vocab[*id] = token.clone();
+                vocab_index.insert(token.clone(), *id);
+            }
+        }
+
+        // Parse merges.txt
+        let mut merges = Vec::new();
+        for line in merges_str.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(space_pos) = line.find(' ') {
+                let a = String::from(&line[..space_pos]);
+                let b = String::from(&line[space_pos + 1..]);
+                merges.push((a, b));
+            }
+        }
+
+        // Assign scores: merges listed first have higher priority = higher score.
+        // Also assign scores so the BPE merge loop can use them.
+        // The merged token gets a score based on its merge rank.
+        for (rank, (a, b)) in merges.iter().enumerate() {
+            let merged = format!("{}{}", a, b);
+            if let Some(&id) = vocab_index.get(&merged) {
+                // Higher score for earlier merges (higher priority).
+                // Use negative rank so that lower rank = higher score.
+                scores[id] = -(rank as f32);
+            }
+        }
+
+        let max_token_length = vocab.iter().map(|s| s.len()).max().unwrap_or(0);
+
+        Tokenizer {
+            vocab,
+            scores,
+            vocab_index,
+            max_token_length,
+            vocab_size,
+            merges,
+            use_merges: true,
         }
     }
 
@@ -147,9 +268,18 @@ impl Tokenizer {
 
     /// Look up a string in the vocabulary. Returns its token ID if found.
     fn lookup(&self, s: &str) -> Option<usize> {
-        // Linear scan — for Stories15M (32k vocab) this is fast enough.
-        // For larger models, use a sorted index.
-        self.vocab.iter().position(|v| v == s)
+        // BTreeMap lookup for O(log n) lookups — scales to Gemma 4's 262k vocab.
+        self.vocab_index.get(s).copied()
+    }
+
+    /// Get the vocabulary size.
+    pub fn vocab_len(&self) -> usize {
+        self.vocab_size
+    }
+
+    /// Check if this tokenizer uses Hugging Face merges format.
+    pub fn is_hf(&self) -> bool {
+        self.use_merges
     }
 }
 
@@ -173,4 +303,10 @@ fn read_f32(data: &[u8], offset: &mut usize) -> f32 {
     ]);
     *offset += 4;
     val
+}
+
+/// Minimal JSON object parser for vocab.json.
+/// Uses the crate's json module to parse vocabs.
+fn genos_kernel_json_parse(input: &str) -> Option<crate::json::JsonValue> {
+    crate::json::parse(input).ok()
 }
