@@ -75,6 +75,7 @@ fn main() -> Status {
     print_usize(config.seq_len);
     screen::println("");
 
+    screen::println("[boot] Building transformer (this takes ~30s in emulation)...");
     let transformer = Transformer::new(config, &model_data[28..]);
 
     // Parse tokenizer
