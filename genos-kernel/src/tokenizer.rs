@@ -21,14 +21,22 @@ impl Tokenizer {
     pub fn load(data: &[u8], vocab_size: usize) -> Self {
         let mut offset = 0;
 
+        // Need at least 4 bytes for the header
+        if data.len() < 4 {
+            return Tokenizer { vocab: Vec::new(), scores: Vec::new(), max_token_length: 0, vocab_size };
+        }
+
         let max_token_length = read_i32(data, &mut offset) as usize;
 
         let mut vocab = Vec::with_capacity(vocab_size);
         let mut scores = Vec::with_capacity(vocab_size);
 
         for _ in 0..vocab_size {
+            // Each entry: f32 score + i32 len + len bytes
+            if offset + 8 > data.len() { break; }
             let score = read_f32(data, &mut offset);
             let len = read_i32(data, &mut offset) as usize;
+            if offset + len > data.len() { break; }
             let bytes = &data[offset..offset + len];
             offset += len;
 
