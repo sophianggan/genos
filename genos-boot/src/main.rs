@@ -10,6 +10,7 @@ use genos_hal::{disk, screen};
 use genos_kernel::config::ModelConfig;
 use genos_kernel::inference::Transformer;
 use genos_kernel::sampler::Sampler;
+use genos_kernel::sysconfig::SystemConfig;
 use genos_kernel::tokenizer::Tokenizer;
 
 #[entry]
@@ -21,6 +22,22 @@ fn main() -> Status {
     screen::println("  genos v0.1.0 — bare-metal LLM operating system");
     screen::println("================================================");
     screen::println("");
+
+    // Load system config (optional)
+    let sys_config = match disk::read_file("\\system\\config.toml") {
+        Ok(data) => {
+            screen::println("[boot] Loaded system config from \\system\\config.toml");
+            SystemConfig::parse(&data)
+        }
+        Err(_) => {
+            screen::println("[boot] No config.toml found, using defaults.");
+            SystemConfig::default_config()
+        }
+    };
+
+    // Read sampling params from config
+    let temperature = sys_config.get_f32("sampling.temperature").unwrap_or(1.0);
+    let top_p = sys_config.get_f32("sampling.top_p").unwrap_or(0.9);
 
     // Load model weights
     screen::println("[boot] Loading model from \\models\\stories15m.bin ...");
@@ -83,8 +100,8 @@ fn main() -> Status {
     let tokenizer = Tokenizer::load(&tok_data, config.vocab_size);
     screen::println("[boot] Tokenizer loaded.");
 
-    // Create sampler
-    let sampler = Sampler::new(config.vocab_size, 1.0, 0.9, 42);
+    // Create sampler with config values
+    let sampler = Sampler::new(config.vocab_size, temperature, top_p, 42);
 
     screen::println("[boot] Ready.");
     screen::println("");
