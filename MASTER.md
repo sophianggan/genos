@@ -4,7 +4,7 @@
 **The LLM *is* the OS.** Boot directly from USB via UEFI (no Linux, Windows, or BSD ever), load a quantized instruction model, and expose a TUI shell where the LLM makes every decision through structured tool calls, persistent memory, and agentic reasoning.
 
 **Repo**: https://github.com/n33levo/genos  
-**Status**: Phase A complete (Stories15M hello world), Phase B-E planned  
+**Status**: Phase A+B complete, Phase C in progress, D-E planned  
 **Stack**: Rust nightly · `x86_64-unknown-uefi` · `#![no_std]` + `core` + `alloc` · `uefi = "0.37"` · `libm = "0.2"`
 
 ---
@@ -243,9 +243,11 @@ pub mod tools;         // Tool registry and dispatcher
 
 ---
 
-### Phase B — OS Kernel Layer
+### ✅ Phase B — OS Kernel Layer (COMPLETE)
 
 **Goal**: Tool API, JSON tool-call protocol, palace memory scaffold, OS wake-up protocol, HTTP client. *Depends on Phase A.*
+
+**Status**: All 11 deliverables implemented across 20 commits. ~3,900 LOC across 32 files. Zero warnings on clean build.
 
 **Core insight from research**: MemPalace (96.6% LongMemEval R@5) proves that *storing everything verbatim + structured retrieval* beats LLM summarization. Wing+room filtering alone adds 34% recall. The memory structure must be established in Phase B or Phase C builds on sand. TurboQuant proves that verbatim data compressed with QJL achieves near-zero accuracy loss — the right approach is never drop data, always compress+preserve. Both findings change Phase B significantly.
 
