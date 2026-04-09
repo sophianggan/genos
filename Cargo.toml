@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "genos-boot",
+    "genos-hal",
+    "genos-kernel",
+    "genos-tools",
+    "genos-agent",
+]
+resolver = "2"
