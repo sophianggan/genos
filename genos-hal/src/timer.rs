@@ -64,3 +64,38 @@ pub fn advance_ms(elapsed_ms: u64) {
         BOOT_STALL_COUNTER += elapsed_ms;
     }
 }
+
+/// RAM info from UEFI memory map.
+pub struct MemInfo {
+    pub free_kb: u64,
+    pub total_kb: u64,
+}
+
+/// Query UEFI memory map for free/total conventional RAM.
+pub fn get_memory_info() -> MemInfo {
+    use uefi::boot;
+    use uefi::mem::memory_map::{MemoryMap, MemoryType};
+
+    let mut free_kb: u64 = 0;
+    let mut total_kb: u64 = 0;
+
+    match boot::memory_map(MemoryType::LOADER_DATA) {
+        Ok(map) => {
+            for desc in map.entries() {
+                let kb = desc.page_count * 4;
+                total_kb += kb;
+                match desc.ty {
+                    MemoryType::CONVENTIONAL
+                    | MemoryType::BOOT_SERVICES_CODE
+                    | MemoryType::BOOT_SERVICES_DATA => {
+                        free_kb += kb;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Err(_) => {}
+    }
+
+    MemInfo { free_kb, total_kb }
+}
