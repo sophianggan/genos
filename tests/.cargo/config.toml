@@ -1,0 +1,6 @@
+# Override the parent genos/.cargo/config.toml which sets target=x86_64-unknown-uefi.
+# The tests crate is a hosted (std) crate; it must compile for the local machine.
+# build-std is NOT listed here because it is only passed explicitly by the
+# Makefile for UEFI builds, not placed in any config.toml.
+[build]
+target = "aarch64-apple-darwin"

@@ -32,13 +32,18 @@ OVMF_CODE ?= $(shell \
 
 .PHONY: build build-debug esp qemu qemu-debug qemu-net qemu-nographic clean help setup-model
 
+# build-std flags: required to compile core/alloc from source for the UEFI target.
+# These are passed explicitly here (not in .cargo/config.toml) so they don't
+# affect other sub-crates in the repo (e.g., the std-based tests crate).
+BUILD_STD = -Z build-std=core,compiler_builtins,alloc -Z build-std-features=compiler-builtins-mem
+
 ## Build in release mode (default — much faster in QEMU emulation)
 build:
-	$(CARGO) build --target $(TARGET) -p genos-boot --release
+	$(CARGO) build --target $(TARGET) -p genos-boot --release $(BUILD_STD)
 
 ## Build debug binary (slow, for development only)
 build-debug:
-	$(CARGO) build --target $(TARGET) -p genos-boot
+	$(CARGO) build --target $(TARGET) -p genos-boot $(BUILD_STD)
 
 ## Create the ESP (EFI System Partition) directory structure
 esp: build
@@ -86,7 +91,7 @@ qemu: esp
 
 ## Run in QEMU with a debug build (slow, for debugging panics)
 qemu-debug:
-	$(CARGO) build --target $(TARGET) -p genos-boot
+	$(CARGO) build --target $(TARGET) -p genos-boot $(BUILD_STD)
 	@mkdir -p $(ESP_DIR)/EFI/BOOT
 	cp target/$(TARGET)/debug/genos-boot.efi $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 	qemu-system-x86_64 \
@@ -135,9 +140,9 @@ setup-model:
 		"https://raw.githubusercontent.com/karpathy/llama2.c/master/tokenizer.bin"
 	@echo "Model files downloaded to $(ESP_DIR)/models/"
 
-## Run host-mode tests (genos-kernel only, no UEFI dependency)
+## Run integration tests (hosted std test suite in tests/)
 test:
-	cargo test -p genos-kernel --features hosted
+	cd tests && cargo test -- --test-threads=1
 
 ## Clean build artifacts
 clean:

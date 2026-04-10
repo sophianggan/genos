@@ -6,4 +6,5 @@ members = [
     "genos-tools",
     "genos-agent",
 ]
+exclude = ["tests"]
 resolver = "2"

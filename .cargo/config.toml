@@ -1,6 +1,5 @@
+# Target for the main UEFI workspace. build-std flags are passed explicitly
+# by the Makefile (-Z build-std=...) so they do NOT bleed into sub-crates
+# (e.g., tests/) that build for the host platform.
 [build]
 target = "x86_64-unknown-uefi"
-
-[unstable]
-build-std = ["core", "compiler_builtins", "alloc"]
-build-std-features = ["compiler-builtins-mem"]

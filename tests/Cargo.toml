@@ -1,0 +1,14 @@
+[package]
+name = "genos-tests"
+version = "0.1.0"
+edition = "2021"
+
+# This is a standalone workspace root — prevents Cargo from walking up to the
+# parent genos/ workspace, which is no_std/UEFI and can't share a lock file
+# with this hosted (std) test crate.
+[workspace]
+
+[dependencies]
+genos-hal = { path = "../genos-hal", features = ["hosted"] }
+genos-kernel = { path = "../genos-kernel", features = ["std"] }
+genos-tools = { path = "../genos-tools", features = ["hosted"] }
