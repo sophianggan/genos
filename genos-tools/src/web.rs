@@ -655,3 +655,161 @@ pub fn tool_cache_invalidate(args: &JsonValue, call_id: &str) -> ToolResult {
     WebCache::invalidate(url);
     ToolResult::success(call_id, JsonValue::Bool(true), 0)
 }
+
+// ─── web.search ──────────────────────────────────────────────────
+
+/// web.search(query, n?) -> [{url, title, snippet}, ...]
+///
+/// Fetches https://html.duckduckgo.com/html/?q=QUERY and scrapes
+/// result__a anchors (url + title) and result__snippet anchors (snippet)
+/// from the returned HTML. No API key required.
+pub fn tool_web_search(args: &JsonValue, call_id: &str) -> ToolResult {
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) if !q.is_empty() => q,
+        _ => return ToolResult::failure(call_id, "invalid_args", "query is required", false),
+    };
+    let n = args.get("n").and_then(|v| v.as_f64()).unwrap_or(5.0) as usize;
+    let n = n.min(10).max(1);
+
+    let encoded = url_encode_query(query);
+    let search_url = format!("https://html.duckduckgo.com/html/?q={}", encoded);
+
+    let html = match genos_hal::net::fetch_text(&search_url) {
+        Ok(b) => b,
+        Err(e) => return ToolResult::failure(call_id, "fetch_failed", e.as_str(), true),
+    };
+
+    let results = parse_ddg_results(&html, n);
+    let items: Vec<JsonValue> = results
+        .into_iter()
+        .map(|(url, title, snippet)| {
+            json_object(&[
+                ("url",     JsonValue::Str(url)),
+                ("title",   JsonValue::Str(title)),
+                ("snippet", JsonValue::Str(snippet)),
+            ])
+        })
+        .collect();
+
+    ToolResult::success(call_id, JsonValue::Array(items), 0)
+}
+
+/// Scan DDG HTML for `result__a` anchors (url + title) and
+/// `result__snippet` anchors (snippet text), returning up to `n` tuples.
+fn parse_ddg_results(html: &str, n: usize) -> Vec<(String, String, String)> {
+    // --- collect (url, title) from class="result__a" anchors ---
+    let mut urls_titles: Vec<(String, String)> = Vec::new();
+    let mut pos = 0usize;
+    while urls_titles.len() < n && pos < html.len() {
+        let marker = "class=\"result__a\"";
+        let rel = match html[pos..].find(marker) {
+            Some(p) => p,
+            None => break,
+        };
+        let abs = pos + rel;
+        // Walk back to the '<' that opens this anchor tag
+        let tag_open = match html[..abs].rfind('<') {
+            Some(p) => p,
+            None => { pos = abs + marker.len(); continue; }
+        };
+        let after_marker = abs + marker.len();
+        let close_gt = match html[after_marker..].find('>') {
+            Some(p) => after_marker + p + 1,
+            None => { pos = after_marker; continue; }
+        };
+        let url = extract_html_attr(&html[tag_open..close_gt], "href");
+        let title_end = match html[close_gt..].find("</a>") {
+            Some(p) => close_gt + p,
+            None => { pos = close_gt; continue; }
+        };
+        let title = html[close_gt..title_end].trim().to_string();
+        urls_titles.push((url, title));
+        pos = title_end + 4;
+    }
+
+    // --- collect snippets from class="result__snippet" anchors ---
+    let mut snippets: Vec<String> = Vec::new();
+    let mut spos = 0usize;
+    while snippets.len() < n && spos < html.len() {
+        let marker = "class=\"result__snippet\"";
+        let rel = match html[spos..].find(marker) {
+            Some(p) => p,
+            None => break,
+        };
+        let abs = spos + rel;
+        let after_marker = abs + marker.len();
+        let close_gt = match html[after_marker..].find('>') {
+            Some(p) => after_marker + p + 1,
+            None => { spos = after_marker; continue; }
+        };
+        let end = match html[close_gt..].find("</a>") {
+            Some(p) => close_gt + p,
+            None => { spos = close_gt; continue; }
+        };
+        snippets.push(strip_inner_html_tags(&html[close_gt..end]));
+        spos = end + 4;
+    }
+
+    // Pair urls_titles with snippets
+    urls_titles
+        .into_iter()
+        .enumerate()
+        .take(n)
+        .map(|(i, (url, title))| {
+            let snippet = snippets.get(i).cloned().unwrap_or_default();
+            (url, title, snippet)
+        })
+        .collect()
+}
+
+/// Extract the value of an HTML attribute from a tag string, e.g. `href="..."`.
+fn extract_html_attr(tag: &str, attr: &str) -> String {
+    let key = format!("{}=\"", attr);
+    let start = match tag.find(key.as_str()) {
+        Some(p) => p + key.len(),
+        None => return String::new(),
+    };
+    let end = match tag[start..].find('"') {
+        Some(p) => start + p,
+        None => return String::new(),
+    };
+    tag[start..end].to_string()
+}
+
+/// Remove HTML tags from a string, collapsing whitespace.
+fn strip_inner_html_tags(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => { in_tag = false; out.push(' '); }
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Percent-encode a query string for use in a URL (spaces become `+`).
+fn url_encode_query(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b' ' => out.push('+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => {
+                out.push('%');
+                out.push(nibble_to_hex(b >> 4));
+                out.push(nibble_to_hex(b & 0x0f));
+            }
+        }
+    }
+    out
+}
+
+fn nibble_to_hex(n: u8) -> char {
+    if n < 10 { (b'0' + n) as char } else { (b'A' + n - 10) as char }
+}
+

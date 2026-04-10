@@ -642,6 +642,56 @@ mod test_web {
         });
         assert!(has_http_link, "Should extract absolute http links");
     }
+
+    // ── web.search ────────────────────────────────────────────────
+
+    #[test]
+    fn web_search_returns_results() {
+        if genos_hal::net::fetch_text("https://html.duckduckgo.com/html/?q=test").is_err() {
+            eprintln!("SKIP test_web::web_search_returns_results — no network");
+            return;
+        }
+        let args = json_object(&[
+            ("query", JsonValue::Str("rust programming language".into())),
+            ("n",     JsonValue::Number(3.0)),
+        ]);
+        let result = genos_tools::web::tool_web_search(&args, "ws1");
+        assert!(result.ok, "web.search should succeed");
+        let items = result.result.as_array().expect("result should be an array");
+        // DDG may return zero results if bot-detection fires; skip in that case
+        if items.is_empty() {
+            eprintln!("SKIP test_web::web_search_returns_results — DDG returned no results (possible bot gate)");
+            return;
+        }
+        for item in items.iter() {
+            let url   = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            assert!(!url.is_empty(),   "Each result must have a url field");
+            assert!(!title.is_empty(), "Each result must have a title field");
+        }
+        let has_https = items.iter().any(|item| {
+            item.get("url").and_then(|v| v.as_str())
+                .map(|u| u.starts_with("https://"))
+                .unwrap_or(false)
+        });
+        assert!(has_https, "At least one result URL should start with https://");
+    }
+
+    #[test]
+    fn web_search_rejects_empty_query() {
+        let args = json_object(&[("query", JsonValue::Str("".into()))]);
+        let result = genos_tools::web::tool_web_search(&args, "ws2");
+        assert!(!result.ok, "Empty query should fail");
+        assert_eq!(result.error.unwrap().code, "invalid_args");
+    }
+
+    #[test]
+    fn web_search_rejects_missing_query() {
+        let args = json_object(&[("n", JsonValue::Number(3.0))]);
+        let result = genos_tools::web::tool_web_search(&args, "ws3");
+        assert!(!result.ok, "Missing query should fail");
+        assert_eq!(result.error.unwrap().code, "invalid_args");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────
