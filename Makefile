@@ -86,7 +86,7 @@ qemu: esp
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 4G \
+		-m 8G \
 		-net none \
 		-serial stdio
 
@@ -99,7 +99,7 @@ qemu-debug:
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 4G \
+		-m 8G \
 		-net none \
 		-serial stdio
 
@@ -114,7 +114,7 @@ qemu-net: esp
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 4G \
+		-m 8G \
 		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
 		-device e1000,netdev=net0 \
 		-serial stdio
@@ -129,7 +129,7 @@ qemu-nographic: esp
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 4G \
+		-m 8G \
 		-net none \
 		-nographic
 

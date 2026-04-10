@@ -242,7 +242,9 @@ impl RunState {
     fn new(config: &Gemma4Config) -> Self {
         let max_q = config.num_attention_heads * config.global_head_dim;
         let max_kv = config.num_kv_heads * config.global_head_dim;
-        let max_att = config.num_attention_heads * config.max_position_embeddings;
+        // Cap att buffer at 8192 tokens max (not full 128k context) to save ~4MB
+        let initial_max_seq = 8192.min(config.max_position_embeddings);
+        let max_att = config.num_attention_heads * initial_max_seq;
         RunState {
             x: vec![0.0; config.hidden_size],
             xb: vec![0.0; config.hidden_size],
