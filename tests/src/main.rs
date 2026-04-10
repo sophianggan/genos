@@ -642,6 +642,54 @@ mod test_web {
         });
         assert!(has_http_link, "Should extract absolute http links");
     }
+
+    // ── web.pdf ───────────────────────────────────────────────────
+
+    #[test]
+    fn web_pdf_fetches_arxiv_paper() {
+        // "Attention is All You Need" — stable, always a PDF
+        let probe_url = "https://arxiv.org/pdf/1706.03762";
+        if genos_hal::net::fetch(probe_url).is_err() {
+            eprintln!("SKIP test_web::web_pdf_fetches_arxiv_paper — no network");
+            return;
+        }
+        let args = json_object(&[("url", JsonValue::Str(probe_url.into()))]);
+        let result = genos_tools::web::tool_web_pdf(&args, "pdf1");
+        assert!(result.ok, "web.pdf should succeed for arxiv PDF");
+        let json = &result.result;
+        let text = json.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(!text.is_empty(), "Extracted text should be non-empty");
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("the") || lower.contains("abstract") || lower.contains("attention"),
+            "Text should contain real words, got start: {}",
+            &text[..text.len().min(200)]
+        );
+        assert!(json.get("pages_estimated").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0,
+            "pages_estimated should be >= 1");
+        assert!(json.get("truncated").is_some(), "truncated field must be present");
+    }
+
+    #[test]
+    fn web_pdf_rejects_non_pdf_url() {
+        if genos_hal::net::fetch("http://info.cern.ch").is_err() {
+            eprintln!("SKIP test_web::web_pdf_rejects_non_pdf_url — no network");
+            return;
+        }
+        // HTML page, not a PDF
+        let args = json_object(&[("url", JsonValue::Str("http://info.cern.ch".into()))]);
+        let result = genos_tools::web::tool_web_pdf(&args, "pdf2");
+        assert!(!result.ok, "HTML page should be rejected as not_a_pdf");
+        assert_eq!(result.error.unwrap().code, "not_a_pdf");
+    }
+
+    #[test]
+    fn web_pdf_rejects_missing_url() {
+        let args = json_object(&[]);
+        let result = genos_tools::web::tool_web_pdf(&args, "pdf3");
+        assert!(!result.ok, "Missing url should fail");
+        assert_eq!(result.error.unwrap().code, "invalid_args");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────

@@ -655,3 +655,304 @@ pub fn tool_cache_invalidate(args: &JsonValue, call_id: &str) -> ToolResult {
     WebCache::invalidate(url);
     ToolResult::success(call_id, JsonValue::Bool(true), 0)
 }
+
+// ─── web.pdf ─────────────────────────────────────────────────────
+
+/// web.pdf(url) -> {url, text, pages_estimated, truncated}
+///
+/// Fetches a PDF from a URL, decompresses its content streams with flate2,
+/// and extracts readable text from PDF text operators (Tj / TJ).
+pub fn tool_web_pdf(args: &JsonValue, call_id: &str) -> ToolResult {
+    let url = match args.get("url").and_then(|v| v.as_str()) {
+        Some(u) if !u.is_empty() => u,
+        _ => return ToolResult::failure(call_id, "invalid_args", "url is required", false),
+    };
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return ToolResult::failure(call_id, "invalid_args", "only http:// and https:// URLs are supported", false);
+    }
+
+    let bytes = match genos_hal::net::fetch(url) {
+        Ok(b) => b,
+        Err(e) => return ToolResult::failure(call_id, "fetch_failed", e.as_str(), true),
+    };
+
+    // Quick sanity check: PDFs start with "%PDF"
+    if !bytes.starts_with(b"%PDF") {
+        return ToolResult::failure(call_id, "not_a_pdf", "URL did not return a PDF document", false);
+    }
+
+    let (text, pages_estimated) = extract_pdf_text(&bytes);
+
+    const MAX_CHARS: usize = 30_000;
+    let truncated = text.len() > MAX_CHARS;
+    let text_out = if truncated {
+        // Truncate at a word boundary
+        let mut end = MAX_CHARS;
+        while end > 0 && !text.is_char_boundary(end) { end -= 1; }
+        while end > 0 && !text.as_bytes()[end - 1].is_ascii_whitespace() { end -= 1; }
+        if end == 0 { end = MAX_CHARS.min(text.len()); }
+        String::from(&text[..end])
+    } else {
+        text
+    };
+
+    let result = json_object(&[
+        ("url",             JsonValue::Str(String::from(url))),
+        ("text",            JsonValue::Str(text_out)),
+        ("pages_estimated", JsonValue::Number(pages_estimated as f64)),
+        ("truncated",       JsonValue::Bool(truncated)),
+    ]);
+    ToolResult::success(call_id, result, 0)
+}
+
+/// Extract text from PDF bytes.
+/// Returns (text, estimated_page_count).
+fn extract_pdf_text(data: &[u8]) -> (String, usize) {
+    let mut text = String::new();
+    let mut page_count = 0usize;
+
+    // Count "/Page " occurrences as a rough page estimate
+    let page_marker = b"/Type /Page\n";
+    let mut i = 0;
+    while i + page_marker.len() <= data.len() {
+        if data[i..].starts_with(b"/Type /Page") {
+            page_count += 1;
+        }
+        i += 1;
+    }
+    if page_count == 0 { page_count = 1; }
+
+    // Locate every "stream … endstream" block
+    let stream_marker  = b"stream";
+    let endstream_marker = b"endstream";
+    let mut pos = 0;
+
+    while pos < data.len() {
+        // Find next "stream" keyword
+        let stream_pos = match find_subsequence(data, stream_marker, pos) {
+            Some(p) => p,
+            None => break,
+        };
+
+        // The stream data starts after "stream\r\n" or "stream\n"
+        let after_keyword = stream_pos + stream_marker.len();
+        let data_start = if data.get(after_keyword) == Some(&b'\r') && data.get(after_keyword + 1) == Some(&b'\n') {
+            after_keyword + 2
+        } else if data.get(after_keyword) == Some(&b'\n') {
+            after_keyword + 1
+        } else {
+            after_keyword
+        };
+
+        // Find the matching "endstream"
+        let end_pos = match find_subsequence(data, endstream_marker, data_start) {
+            Some(p) => p,
+            None => break,
+        };
+
+        // Look at the object header (bytes before "stream\n") for /FlateDecode
+        let header_start = header_search_start(data, stream_pos);
+        let header = &data[header_start..stream_pos];
+        let is_flat = contains_subsequence(header, b"/FlateDecode")
+            || contains_subsequence(header, b"/Fl ");
+
+        let stream_bytes = &data[data_start..end_pos];
+
+        if is_flat {
+            if let Some(decompressed) = decompress_zlib(stream_bytes) {
+                extract_text_from_content_stream(&decompressed, &mut text);
+            }
+        } else {
+            // Try plain (uncompressed) content stream
+            if let Ok(s) = core::str::from_utf8(stream_bytes) {
+                extract_text_from_content_stream_str(s, &mut text);
+            }
+        }
+
+        pos = end_pos + endstream_marker.len();
+    }
+
+    (text, page_count)
+}
+
+/// Find the start of the object header preceding a stream (up to 1 KB back).
+fn header_search_start(data: &[u8], stream_pos: usize) -> usize {
+    if stream_pos > 1024 { stream_pos - 1024 } else { 0 }
+}
+
+/// Find first occurrence of `needle` in `haystack` starting at `start`.
+fn find_subsequence(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+    if needle.len() > haystack.len() { return None; }
+    let limit = haystack.len() - needle.len();
+    for i in start..=limit {
+        if &haystack[i..i + needle.len()] == needle {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Check if `haystack` contains `needle`.
+fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
+    find_subsequence(haystack, needle, 0).is_some()
+}
+
+/// Decompress zlib/deflate bytes using the flate2 crate (hosted builds only).
+#[cfg(feature = "hosted")]
+fn decompress_zlib(data: &[u8]) -> Option<Vec<u8>> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+    let mut decoder = ZlibDecoder::new(data);
+    let mut out = Vec::new();
+    match decoder.read_to_end(&mut out) {
+        Ok(_) => Some(out),
+        Err(_) => {
+            // Some PDFs use raw deflate without the zlib wrapper
+            use flate2::read::DeflateDecoder;
+            let mut decoder2 = DeflateDecoder::new(data);
+            let mut out2 = Vec::new();
+            match decoder2.read_to_end(&mut out2) {
+                Ok(_) if !out2.is_empty() => Some(out2),
+                _ => None,
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "hosted"))]
+fn decompress_zlib(_data: &[u8]) -> Option<Vec<u8>> {
+    None
+}
+
+/// Extract visible text from a decompressed PDF content stream (bytes).
+fn extract_text_from_content_stream(data: &[u8], out: &mut String) {
+    if let Ok(s) = core::str::from_utf8(data) {
+        extract_text_from_content_stream_str(s, out);
+    } else {
+        // Try latin-1 fallback: filter to printable ASCII
+        let ascii: String = data.iter()
+            .map(|&b| if b >= 0x20 && b < 0x7f { b as char } else { ' ' })
+            .collect();
+        extract_text_from_content_stream_str(&ascii, out);
+    }
+}
+
+/// Extract visible text from a PDF content stream string.
+///
+/// Handles the two common PDF text operators:
+///   (text) Tj      — show single string
+///   [(text) ...] TJ — show array of strings
+fn extract_text_from_content_stream_str(s: &str, out: &mut String) {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Collect all parenthesised strings just before a Tj/TJ operator.
+    // We track raw strings and flush them when we see Tj or TJ.
+    let mut pending: Vec<String> = Vec::new();
+
+    while i < len {
+        match bytes[i] {
+            b'(' => {
+                // Read PDF literal string, handling escape sequences and nesting
+                let (pstr, consumed) = read_pdf_string(bytes, i);
+                pending.push(pstr);
+                i += consumed;
+            }
+            b'T' if i + 1 < len && (bytes[i + 1] == b'j' || bytes[i + 1] == b'J') => {
+                // Flush pending strings as a text run
+                for s in pending.drain(..) {
+                    if !s.trim().is_empty() {
+                        out.push_str(s.trim());
+                        out.push(' ');
+                    }
+                }
+                i += 2;
+            }
+            b'B' if i + 1 < len && bytes[i + 1] == b'T' => {
+                // Begin Text block — just advance
+                i += 2;
+            }
+            b'E' if i + 1 < len && bytes[i + 1] == b'T' => {
+                // End Text block — insert newline to separate blocks
+                if !out.ends_with('\n') && !out.is_empty() {
+                    out.push('\n');
+                }
+                pending.clear();
+                i += 2;
+            }
+            _ => {
+                // Any non-string, non-operator character resets pending
+                // unless it's whitespace/brackets (part of TJ array syntax)
+                if bytes[i] != b'[' && bytes[i] != b']'
+                    && bytes[i] != b' ' && bytes[i] != b'\n'
+                    && bytes[i] != b'\r' && bytes[i] != b'\t'
+                {
+                    // Non-whitespace, non-array character not consumed above:
+                    // if previous token was not a string, discard pending
+                    if !pending.is_empty() {
+                        let last = pending.last().map(|s| s.as_str()).unwrap_or("");
+                        // Keep pending if this looks like it could precede Tj
+                        let _ = last;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+}
+
+/// Read a PDF literal string starting at `start` (which must be `(`).
+/// Returns (decoded_string, bytes_consumed_including_parens).
+fn read_pdf_string(bytes: &[u8], start: usize) -> (String, usize) {
+    let mut result = String::new();
+    let mut i = start + 1; // skip opening '('
+    let mut depth = 1usize;
+
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'\\' if i + 1 < bytes.len() => {
+                match bytes[i + 1] {
+                    b'n'  => { result.push('\n'); i += 2; }
+                    b'r'  => { result.push('\r'); i += 2; }
+                    b't'  => { result.push('\t'); i += 2; }
+                    b'('  => { result.push('(');  i += 2; }
+                    b')'  => { result.push(')');  i += 2; }
+                    b'\\' => { result.push('\\'); i += 2; }
+                    b'0'..=b'7' => {
+                        // Octal escape up to 3 digits
+                        let mut oct = 0u32;
+                        let mut j = 0;
+                        while j < 3 && i + 1 + j < bytes.len()
+                            && bytes[i + 1 + j] >= b'0' && bytes[i + 1 + j] <= b'7'
+                        {
+                            oct = oct * 8 + (bytes[i + 1 + j] - b'0') as u32;
+                            j += 1;
+                        }
+                        if let Some(c) = char::from_u32(oct) { result.push(c); }
+                        i += 1 + j;
+                    }
+                    _ => { i += 2; }
+                }
+            }
+            b'(' => { depth += 1; result.push('('); i += 1; }
+            b')' => {
+                depth -= 1;
+                if depth > 0 { result.push(')'); }
+                i += 1;
+            }
+            b => {
+                let ch = b as char;
+                // Only include printable ASCII and common whitespace
+                if ch.is_ascii_graphic() || ch == ' ' {
+                    result.push(ch);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let consumed = i - start;
+    (result, consumed)
+}
