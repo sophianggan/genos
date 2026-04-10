@@ -144,6 +144,11 @@ setup-model:
 test:
 	cd tests && cargo test -- --test-threads=1
 
+## Run kernel unit tests on the host machine
+## Note: --target is required because .cargo/config.toml defaults to x86_64-unknown-uefi
+test-kernel:
+	cargo test -p genos-kernel --features hosted --target $(shell rustc -vV | grep host | cut -d' ' -f2)
+
 ## Clean build artifacts
 clean:
 	$(CARGO) clean
