@@ -7,9 +7,13 @@ extern crate alloc;
 extern crate std as alloc;
 
 pub mod config;
+pub mod gemma4;
+pub mod gguf;
 pub mod inference;
 pub mod json;
+pub mod kv_cache;
 pub mod sampler;
+pub mod simd;
 pub mod sysconfig;
 pub mod tokenizer;
 pub mod weights;
