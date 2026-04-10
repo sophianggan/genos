@@ -299,9 +299,10 @@ fn parse_u32(s: &str) -> Option<u32> {
 /// 3. Fallback: fetch URL, strip HTML
 fn fetch_page(url: &str, max_tokens: usize) -> PageContent {
     let domain = extract_domain(url);
+    let scheme = if url.starts_with("https://") { "https" } else { "http" };
 
     // Step 1: Try llms.txt
-    let llms_url = format!("http://{}/llms.txt", domain);
+    let llms_url = format!("{}://{}/llms.txt", scheme, domain);
     if let Ok(data) = genos_hal::net::fetch(&llms_url) {
         let text = String::from_utf8_lossy(&data).into_owned();
         if !text.is_empty() {
@@ -323,7 +324,7 @@ fn fetch_page(url: &str, max_tokens: usize) -> PageContent {
     }
 
     // Step 2: Try llm.txt
-    let llm_url = format!("http://{}/llm.txt", domain);
+    let llm_url = format!("{}://{}/llm.txt", scheme, domain);
     if let Ok(data) = genos_hal::net::fetch(&llm_url) {
         let text = String::from_utf8_lossy(&data).into_owned();
         if !text.is_empty() {
@@ -415,12 +416,12 @@ pub fn tool_get_page(args: &JsonValue, call_id: &str) -> ToolResult {
         None => return ToolResult::failure(call_id, "invalid_args", "missing 'url'", false),
     };
 
-    // Only HTTP supported
-    if !url.starts_with("http://") {
+    // HTTP and HTTPS supported
+    if !url.starts_with("http://") && !url.starts_with("https://") {
         return ToolResult::failure(
             call_id,
             "invalid_args",
-            "only http:// URLs supported (no TLS until Phase D)",
+            "only http:// and https:// URLs are supported",
             false,
         );
     }
@@ -443,9 +444,10 @@ pub fn tool_read_llms(args: &JsonValue, call_id: &str) -> ToolResult {
 
     let domain = extract_domain(url);
 
-    // Try llms.txt first, then llm.txt
+    // Try llms.txt on both https and http
+    let scheme = if url.starts_with("https://") { "https" } else { "http" };
     for suffix in &["llms.txt", "llm.txt"] {
-        let check_url = format!("http://{}/{}", domain, suffix);
+        let check_url = format!("{}://{}/{}", scheme, domain, suffix);
         if let Ok(data) = genos_hal::net::fetch(&check_url) {
             let text = String::from_utf8_lossy(&data).into_owned();
             if !text.is_empty() {
@@ -464,8 +466,8 @@ pub fn tool_extract_links(args: &JsonValue, call_id: &str) -> ToolResult {
         None => return ToolResult::failure(call_id, "invalid_args", "missing 'url'", false),
     };
 
-    if !url.starts_with("http://") {
-        return ToolResult::failure(call_id, "invalid_args", "only http:// URLs supported", false);
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return ToolResult::failure(call_id, "invalid_args", "only http:// and https:// URLs are supported", false);
     }
 
     let domain = extract_domain(url);

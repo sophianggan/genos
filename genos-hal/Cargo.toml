@@ -3,6 +3,11 @@ name = "genos-hal"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+hosted = ["dep:native-tls"]
+
 [dependencies]
 uefi = { version = "0.37", features = ["alloc"] }
 log = "0.4"
+native-tls = { version = "0.2.18", optional = true }

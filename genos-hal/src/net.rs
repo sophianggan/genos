@@ -133,12 +133,149 @@ fn parse_status_code(line: &str) -> Result<u16, NetError> {
 /// because the uefi 0.37 crate doesn't expose TCP4 bindings.
 /// All HTTP logic (URL parsing, request building, response parsing)
 /// is implemented and ready for TCP4 wiring.
+#[cfg(not(feature = "hosted"))]
 pub fn fetch(url: &str) -> Result<Vec<u8>, NetError> {
     let parsed = parse_url(url)?;
     // Build request (validates URL structure even if we can't send it yet)
     let _request = build_get_request(parsed.host, parsed.path);
     // TCP4 socket layer is not yet available in the uefi crate.
     Err(NetError::NoInterface)
+}
+
+/// Hosted fetch: uses std::net TCP to perform real HTTP GET requests.
+#[cfg(feature = "hosted")]
+pub fn fetch(url: &str) -> Result<Vec<u8>, NetError> {
+    fetch_following_redirects(url, 0)
+}
+
+#[cfg(feature = "hosted")]
+fn fetch_following_redirects(url: &str, depth: u8) -> Result<Vec<u8>, NetError> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    if depth > 5 {
+        return Err(NetError::ParseError); // too many redirects
+    }
+
+    let is_https = url.starts_with("https://");
+    let is_http  = url.starts_with("http://");
+    if !is_http && !is_https {
+        return Err(NetError::ParseError);
+    }
+
+    let parsed = parse_url_either(url)?;
+    let request = build_get_request(&parsed.host, &parsed.path);
+    let addr = format!("{}:{}", parsed.host, parsed.port);
+
+    // Read the full raw response into a buffer
+    let response: Vec<u8> = if is_https {
+        use native_tls::TlsConnector;
+        let connector = TlsConnector::new().map_err(|_| NetError::ConnectFailed)?;
+        let tcp = TcpStream::connect(&addr).map_err(|_| NetError::ConnectFailed)?;
+        tcp.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_| NetError::IoError)?;
+        let mut tls = connector.connect(&parsed.host, tcp).map_err(|_| NetError::ConnectFailed)?;
+        tls.write_all(&request).map_err(|_| NetError::IoError)?;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match tls.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
+                Err(_) => break,
+            }
+        }
+        buf
+    } else {
+        let mut stream = TcpStream::connect(&addr).map_err(|_| NetError::ConnectFailed)?;
+        stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_| NetError::IoError)?;
+        stream.write_all(&request).map_err(|_| NetError::IoError)?;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
+                Err(_) => break,
+            }
+        }
+        buf
+    };
+
+    let (status, body) = parse_response(&response)?;
+
+    // Follow 3xx redirects
+    if status >= 300 && status < 400 {
+        if let Some(location) = extract_location_header(&response) {
+            return fetch_following_redirects(&location, depth + 1);
+        }
+    }
+
+    if status >= 400 {
+        return Err(NetError::HttpError(status));
+    }
+    Ok(body)
+}
+
+/// Parse a URL that may be http:// or https://
+#[cfg(feature = "hosted")]
+fn parse_url_either(url: &str) -> Result<ParsedUrlOwned, NetError> {
+    let (rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
+        (r, 443u16)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (r, 80u16)
+    } else {
+        return Err(NetError::ParseError);
+    };
+
+    let (host_port, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+
+    let (host, port) = match host_port.find(':') {
+        Some(i) => {
+            let p = parse_u16(&host_port[i + 1..]).ok_or(NetError::ParseError)?;
+            (host_port[..i].to_string(), p)
+        }
+        None => (host_port.to_string(), default_port),
+    };
+
+    if host.is_empty() {
+        return Err(NetError::ParseError);
+    }
+
+    Ok(ParsedUrlOwned {
+        host,
+        port,
+        path: path.to_string(),
+    })
+}
+
+#[cfg(feature = "hosted")]
+struct ParsedUrlOwned {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+/// Extract the Location header from a raw HTTP response.
+#[cfg(feature = "hosted")]
+fn extract_location_header(response: &[u8]) -> Option<String> {
+    let header_end = find_header_end(response)?;
+    let headers = core::str::from_utf8(&response[..header_end]).ok()?;
+    for line in headers.lines() {
+        let lower = line.to_lowercase();
+        if lower.starts_with("location:") {
+            let loc = line[9..].trim();
+            return Some(loc.to_string());
+        }
+    }
+    None
 }
 
 /// Convenience: fetch a URL and return the body as a UTF-8 string.

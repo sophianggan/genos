@@ -12,14 +12,18 @@ pub fn tool_fetch(args: &JsonValue, call_id: &str) -> ToolResult {
         None => return ToolResult::failure(call_id, "invalid_args", "missing 'url'", false),
     };
 
-    // Reject non-HTTP URLs
-    if !url.starts_with("http://") {
+    // Reject non-HTTP/HTTPS URLs
+    if !url.starts_with("http://") && !url.starts_with("https://") {
         return ToolResult::failure(
             call_id,
             "invalid_args",
-            "only http:// URLs supported (no TLS until Phase D)",
+            "only http:// and https:// URLs are supported",
             false,
         );
+    }
+
+    if url.is_empty() || url == "http://" || url == "https://" {
+        return ToolResult::failure(call_id, "invalid_args", "empty URL", false);
     }
 
     match net::fetch(url) {

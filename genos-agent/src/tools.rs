@@ -84,6 +84,9 @@ fn dispatch(
         "fs.list" => genos_tools::fs::tool_list(args, call_id),
         "fs.delete" => genos_tools::fs::tool_delete(args, call_id),
         "net.fetch" => genos_tools::net::tool_fetch(args, call_id),
+        "web.get_page" => genos_tools::web::tool_get_page(args, call_id),
+        "web.read_llms" => genos_tools::web::tool_read_llms(args, call_id),
+        "web.extract_links" => genos_tools::web::tool_extract_links(args, call_id),
         "memory.facts_get" => genos_tools::memory::tool_facts_get(args, call_id),
         "memory.facts_set" => genos_tools::memory::tool_facts_set(args, call_id, timestamp),
         "memory.log_turn" => {
