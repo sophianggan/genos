@@ -1,7 +1,5 @@
 use alloc::format;
 use alloc::string::String;
-use core::time::Duration;
-use uefi::boot;
 
 /// Wall-clock timestamp from UEFI GetTime().
 #[derive(Clone, Copy)]
@@ -32,7 +30,8 @@ impl WallTime {
     }
 }
 
-/// Get the current wall-clock time from UEFI runtime services.
+/// Get the current wall-clock time.
+#[cfg(not(feature = "hosted"))]
 pub fn get_wall_time() -> Option<WallTime> {
     let time = uefi::runtime::get_time().ok()?;
     Some(WallTime {
@@ -45,9 +44,29 @@ pub fn get_wall_time() -> Option<WallTime> {
     })
 }
 
+#[cfg(feature = "hosted")]
+pub fn get_wall_time() -> Option<WallTime> {
+    // Return a fixed timestamp for deterministic tests
+    Some(WallTime {
+        year: 2026,
+        month: 4,
+        day: 9,
+        hour: 12,
+        minute: 0,
+        second: 0,
+    })
+}
+
 /// Sleep for the given number of milliseconds.
+#[cfg(not(feature = "hosted"))]
 pub fn sleep_ms(ms: u64) {
-    boot::stall(Duration::from_millis(ms));
+    use core::time::Duration;
+    uefi::boot::stall(Duration::from_millis(ms));
+}
+
+#[cfg(feature = "hosted")]
+pub fn sleep_ms(ms: u64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms));
 }
 
 /// Monotonic millisecond counter — cooperative, advanced after each turn.
@@ -71,7 +90,8 @@ pub struct MemInfo {
     pub total_kb: u64,
 }
 
-/// Query UEFI memory map for free/total conventional RAM.
+/// Query memory info.
+#[cfg(not(feature = "hosted"))]
 pub fn get_memory_info() -> MemInfo {
     use uefi::boot;
     use uefi::mem::memory_map::{MemoryMap, MemoryType};
@@ -98,4 +118,12 @@ pub fn get_memory_info() -> MemInfo {
     }
 
     MemInfo { free_kb, total_kb }
+}
+
+#[cfg(feature = "hosted")]
+pub fn get_memory_info() -> MemInfo {
+    MemInfo {
+        free_kb: 1024 * 1024, // 1 GB free
+        total_kb: 2 * 1024 * 1024, // 2 GB total
+    }
 }
