@@ -83,9 +83,10 @@ qemu: esp
 		exit 1; \
 	fi
 	qemu-system-x86_64 \
+		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 512M \
+		-m 4G \
 		-net none \
 		-serial stdio
 
@@ -95,9 +96,10 @@ qemu-debug:
 	@mkdir -p $(ESP_DIR)/EFI/BOOT
 	cp target/$(TARGET)/debug/genos-boot.efi $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 	qemu-system-x86_64 \
+		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 512M \
+		-m 4G \
 		-net none \
 		-serial stdio
 
@@ -109,9 +111,10 @@ qemu-net: esp
 		exit 1; \
 	fi
 	qemu-system-x86_64 \
+		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 512M \
+		-m 4G \
 		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
 		-device e1000,netdev=net0 \
 		-serial stdio
@@ -123,9 +126,10 @@ qemu-nographic: esp
 		exit 1; \
 	fi
 	qemu-system-x86_64 \
+		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 512M \
+		-m 4G \
 		-net none \
 		-nographic
 

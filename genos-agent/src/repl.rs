@@ -138,8 +138,14 @@ impl Repl {
             let header = state.status_header();
 
             // Step 4: Build full prompt
-            // [system_prompt] [wake_up_header] [L2 context] [user_input]
-            let full_prompt = if l2_context.is_empty() {
+            // For tiny models (Stories15M, 256 tokens), skip the system prompt
+            // entirely — it's way too large and leaves no room for generation.
+            // Instead, use a minimal prompt that just frames the user input.
+            let full_prompt = if self.max_seq_len <= 512 {
+                // Tiny model: just pass the user's text directly so the model
+                // can generate a story/completion from it.
+                format!("{}\n", trimmed)
+            } else if l2_context.is_empty() {
                 format!(
                     "{}\n{}\nUser: {}\nAssistant:",
                     state.system_prompt, header, trimmed
@@ -282,10 +288,19 @@ impl Repl {
         let mut pos = 0usize;
         let mut output = String::new();
 
+        // Show progress during prompt processing (each forward pass is slow under emulation)
+        if num_prompt_tokens > 1 {
+            screen::print(&format!("[processing {} tokens] ", num_prompt_tokens));
+        }
+
         while pos < self.max_seq_len {
             let logits = self.transformer.forward(token, pos);
 
             let next_token = if pos < num_prompt_tokens - 1 {
+                // Still processing prompt tokens — show progress dot every 10 tokens
+                if pos > 0 && pos % 10 == 0 {
+                    screen::print(".");
+                }
                 prompt_tokens[pos + 1]
             } else {
                 let mut logits_buf: Vec<f32> = logits.to_vec();
@@ -295,6 +310,10 @@ impl Repl {
             pos += 1;
 
             if pos >= num_prompt_tokens {
+                // First generated token — clear the progress line
+                if pos == num_prompt_tokens {
+                    screen::println("");
+                }
                 let piece = self.tokenizer.decode(token, next_token);
                 screen::print(piece);
                 output.push_str(piece);
