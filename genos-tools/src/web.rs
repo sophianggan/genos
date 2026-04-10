@@ -655,3 +655,138 @@ pub fn tool_cache_invalidate(args: &JsonValue, call_id: &str) -> ToolResult {
     WebCache::invalidate(url);
     ToolResult::success(call_id, JsonValue::Bool(true), 0)
 }
+
+// ─── web.feed ────────────────────────────────────────────────────
+
+/// web.feed(url, max_items?) -> {feed_title, feed_url, items, item_count}
+///
+/// Fetches an RSS or Atom feed and returns a structured list of entries.
+/// No XML parser crate needed — uses lightweight tag scanning.
+pub fn tool_web_feed(args: &JsonValue, call_id: &str) -> ToolResult {
+    let url = match args.get("url").and_then(|v| v.as_str()) {
+        Some(u) if !u.is_empty() => u,
+        _ => return ToolResult::failure(call_id, "invalid_args", "url is required", false),
+    };
+    let max_items = args.get("max_items").and_then(|v| v.as_f64()).unwrap_or(20.0) as usize;
+    let max_items = max_items.min(50).max(1);
+
+    let xml = match genos_hal::net::fetch_text(url) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::failure(call_id, "fetch_failed", e.as_str(), true),
+    };
+
+    let (feed_title, items) = if xml.contains("<entry") {
+        parse_atom(&xml, max_items)
+    } else {
+        parse_rss(&xml, max_items)
+    };
+
+    let item_count = items.len();
+    let items_json: Vec<JsonValue> = items
+        .into_iter()
+        .map(|(title, item_url, summary, published_at)| {
+            json_object(&[
+                ("title",        JsonValue::Str(title)),
+                ("url",          JsonValue::Str(item_url)),
+                ("summary",      JsonValue::Str(summary)),
+                ("published_at", JsonValue::Str(published_at)),
+            ])
+        })
+        .collect();
+
+    let result = json_object(&[
+        ("feed_title",  JsonValue::Str(feed_title)),
+        ("feed_url",    JsonValue::Str(String::from(url))),
+        ("items",       JsonValue::Array(items_json)),
+        ("item_count",  JsonValue::Number(item_count as f64)),
+    ]);
+    ToolResult::success(call_id, result, 0)
+}
+
+/// Parse RSS 2.0 XML — scans for `<item>` blocks.
+fn parse_rss(xml: &str, max: usize) -> (String, Vec<(String, String, String, String)>) {
+    let feed_title = feed_extract_tag(xml, "title").unwrap_or_default().to_string();
+    let mut items = Vec::new();
+    let mut pos = 0usize;
+    while items.len() < max && pos < xml.len() {
+        let item_open = match xml[pos..].find("<item") {
+            Some(p) => pos + p,
+            None => break,
+        };
+        let item_close = match xml[item_open..].find("</item>") {
+            Some(p) => item_open + p + 7,
+            None => break,
+        };
+        let block = &xml[item_open..item_close];
+        let title       = feed_extract_tag(block, "title").unwrap_or("").trim().to_string();
+        let link        = feed_extract_tag(block, "link").unwrap_or("").trim().to_string();
+        let description = feed_extract_tag(block, "description").unwrap_or("").trim().to_string();
+        let pub_date    = feed_extract_tag(block, "pubDate").unwrap_or("").trim().to_string();
+        // Strip CDATA wrappers if present
+        let title       = strip_cdata(&title);
+        let description = strip_cdata(&description);
+        items.push((title, link, description, pub_date));
+        pos = item_close;
+    }
+    (feed_title, items)
+}
+
+/// Parse Atom XML — scans for `<entry>` blocks.
+fn parse_atom(xml: &str, max: usize) -> (String, Vec<(String, String, String, String)>) {
+    let feed_title = feed_extract_tag(xml, "title").unwrap_or_default().to_string();
+    let mut items = Vec::new();
+    let mut pos = 0usize;
+    while items.len() < max && pos < xml.len() {
+        let entry_open = match xml[pos..].find("<entry") {
+            Some(p) => pos + p,
+            None => break,
+        };
+        let entry_close = match xml[entry_open..].find("</entry>") {
+            Some(p) => entry_open + p + 8,
+            None => break,
+        };
+        let block = &xml[entry_open..entry_close];
+        let title     = feed_extract_tag(block, "title").unwrap_or("").trim().to_string();
+        let summary   = feed_extract_tag(block, "summary").unwrap_or("").trim().to_string();
+        let published = feed_extract_tag(block, "published")
+            .or_else(|| feed_extract_tag(block, "updated"))
+            .unwrap_or("").trim().to_string();
+        // Atom link is an empty element: <link href="..."/>
+        let link = feed_extract_attr(block, "link", "href").unwrap_or_default();
+        let title   = strip_cdata(&title);
+        let summary = strip_cdata(&summary);
+        items.push((title, link, summary, published));
+        pos = entry_close;
+    }
+    (feed_title, items)
+}
+
+/// Extract inner text of the first `<tag>...</tag>` in `xml`.
+fn feed_extract_tag<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open  = format!("<{}>",  tag);
+    let close = format!("</{}>", tag);
+    let start = xml.find(open.as_str())? + open.len();
+    let end   = xml[start..].find(close.as_str())? + start;
+    Some(&xml[start..end])
+}
+
+/// Extract an attribute value from the first occurrence of `<element attr="...">`.
+fn feed_extract_attr(xml: &str, element: &str, attr: &str) -> Option<String> {
+    let elem_start = xml.find(&format!("<{}", element))?;
+    let tag_end = xml[elem_start..].find('>')?  + elem_start;
+    let tag = &xml[elem_start..tag_end + 1];
+    let key = format!("{}=\"", attr);
+    let val_start = tag.find(key.as_str())? + key.len();
+    let val_end = tag[val_start..].find('"')? + val_start;
+    Some(tag[val_start..val_end].to_string())
+}
+
+/// Remove `<![CDATA[...]]>` wrappers if present.
+fn strip_cdata(s: &str) -> String {
+    let s = s.trim();
+    if let Some(inner) = s.strip_prefix("<![CDATA[").and_then(|t| t.strip_suffix("]]>")) {
+        inner.trim().to_string()
+    } else {
+        s.to_string()
+    }
+}

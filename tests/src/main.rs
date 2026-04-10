@@ -642,6 +642,76 @@ mod test_web {
         });
         assert!(has_http_link, "Should extract absolute http links");
     }
+
+    // ── web.feed ──────────────────────────────────────────────────
+
+    #[test]
+    fn web_feed_reads_arxiv_rss() {
+        let feed_url = "https://export.arxiv.org/rss/cs.AI";
+        if genos_hal::net::fetch_text(feed_url).is_err() {
+            eprintln!("SKIP test_web::web_feed_reads_arxiv_rss — no network");
+            return;
+        }
+        let args = json_object(&[
+            ("url",       JsonValue::Str(feed_url.into())),
+            ("max_items", JsonValue::Number(5.0)),
+        ]);
+        let result = genos_tools::web::tool_web_feed(&args, "feed1");
+        assert!(result.ok, "web.feed should succeed for arXiv RSS");
+        let json = &result.result;
+        let empty = vec![];
+        let items = json.get("items").and_then(|v| v.as_array()).unwrap_or(&empty);
+        assert!(!items.is_empty(), "arXiv feed should have items");
+        for item in items.iter() {
+            assert!(item.get("title").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
+                "Each item must have a non-empty title");
+            assert!(item.get("url").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
+                "Each item must have a non-empty url");
+        }
+        assert!(json.get("item_count").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0,
+            "item_count should be >= 1");
+    }
+
+    #[test]
+    fn web_feed_reads_hackernews() {
+        let feed_url = "https://hnrss.org/frontpage";
+        if genos_hal::net::fetch_text(feed_url).is_err() {
+            eprintln!("SKIP test_web::web_feed_reads_hackernews — no network");
+            return;
+        }
+        let args = json_object(&[
+            ("url",       JsonValue::Str(feed_url.into())),
+            ("max_items", JsonValue::Number(5.0)),
+        ]);
+        let result = genos_tools::web::tool_web_feed(&args, "feed2");
+        assert!(result.ok, "web.feed should succeed for HN RSS");
+        let json = &result.result;
+        let empty = vec![];
+        let items = json.get("items").and_then(|v| v.as_array()).unwrap_or(&empty);
+        assert!(!items.is_empty(), "HN feed should have items");
+        for item in items.iter() {
+            assert!(item.get("title").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
+                "Each HN item must have a non-empty title");
+            assert!(item.get("url").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
+                "Each HN item must have a non-empty url");
+        }
+    }
+
+    #[test]
+    fn web_feed_rejects_missing_url() {
+        let args = json_object(&[("max_items", JsonValue::Number(5.0))]);
+        let result = genos_tools::web::tool_web_feed(&args, "feed3");
+        assert!(!result.ok, "Missing url should fail");
+        assert_eq!(result.error.unwrap().code, "invalid_args");
+    }
+
+    #[test]
+    fn web_feed_rejects_empty_url() {
+        let args = json_object(&[("url", JsonValue::Str("".into()))]);
+        let result = genos_tools::web::tool_web_feed(&args, "feed4");
+        assert!(!result.ok, "Empty url should fail");
+        assert_eq!(result.error.unwrap().code, "invalid_args");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────

@@ -87,6 +87,7 @@ fn dispatch(
         "web.get_page" => genos_tools::web::tool_get_page(args, call_id),
         "web.read_llms" => genos_tools::web::tool_read_llms(args, call_id),
         "web.extract_links" => genos_tools::web::tool_extract_links(args, call_id),
+        "web.feed" => genos_tools::web::tool_web_feed(args, call_id),
         "memory.facts_get" => genos_tools::memory::tool_facts_get(args, call_id),
         "memory.facts_set" => genos_tools::memory::tool_facts_set(args, call_id, timestamp),
         "memory.log_turn" => {
