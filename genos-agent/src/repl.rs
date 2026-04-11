@@ -1,8 +1,9 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::format;
 use genos_hal::{keyboard, screen, timer};
-use genos_kernel::inference::Transformer;
+use genos_kernel::LLMRuntime;
 use genos_kernel::json;
 use genos_kernel::sampler::Sampler;
 use genos_kernel::tokenizer::Tokenizer;
@@ -31,22 +32,22 @@ use crate::wakeup;
 /// 9. Write verbatim to palace
 /// 10. Run pre_compact if needed
 /// 11. Update turn counter
-pub struct Repl {
-    transformer: Transformer,
+pub struct Repl<'a> {
+    model: Box<dyn LLMRuntime + 'a>,
     tokenizer: Tokenizer,
     sampler: Sampler,
     max_seq_len: usize,
 }
 
-impl Repl {
+impl<'a> Repl<'a> {
     pub fn new(
-        transformer: Transformer,
+        model: Box<dyn LLMRuntime + 'a>,
         tokenizer: Tokenizer,
         sampler: Sampler,
         max_seq_len: usize,
     ) -> Self {
         Repl {
-            transformer,
+            model,
             tokenizer,
             sampler,
             max_seq_len,
@@ -69,9 +70,9 @@ impl Repl {
         let session_id = palace::ensure_structure(&time_suffix);
 
         // Step 2: Load wake-up state (system prompt from palace)
-        let mut state = wakeup::load(&session_id);
+        let mut state = wakeup::load_with_budget(&session_id, self.max_seq_len);
         screen::print_status(&format!(
-            "Session {} | Phase B | Context budget: {} tokens",
+            "Session {} | Phase D | Context budget: {} tokens",
             session_id, state.context_budget
         ));
 
@@ -157,8 +158,8 @@ impl Repl {
                 )
             };
 
-            // Reset transformer for fresh generation
-            self.transformer.reset();
+            // Reset model for fresh generation
+            self.model.reset();
 
             // Tokenize
             let tokens = self.tokenizer.encode(&full_prompt, true, false);
@@ -269,8 +270,8 @@ impl Repl {
             let uptime = timer::now_ms() / 1000;
             let mem = timer::get_memory_info();
             screen::render_status_bar(
-                "stories15m",
-                0.0, // tokens/sec computed in Phase D
+                self.model.model_name(),
+                0.0,
                 (mem.total_kb.saturating_sub(mem.free_kb) / 1024) as usize,
                 (mem.total_kb / 1024) as usize,
                 state.turn,
@@ -294,7 +295,7 @@ impl Repl {
         }
 
         while pos < self.max_seq_len {
-            let logits = self.transformer.forward(token, pos);
+            let logits = self.model.forward(token, pos);
 
             let next_token = if pos < num_prompt_tokens - 1 {
                 // Still processing prompt tokens — show progress dot every 10 tokens

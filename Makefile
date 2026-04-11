@@ -6,6 +6,9 @@ TARGET = x86_64-unknown-uefi
 BUILD_DIR = target/$(TARGET)/release
 EFI_BINARY = $(BUILD_DIR)/genos-boot.efi
 ESP_DIR = esp
+ESP_IMG = esp.img
+# ESP image size: 6G — enough for the 2.8G Gemma 4 GGUF + system files
+# QEMU fat:rw has a 2GB-per-file limit; a raw FAT32 image has no such limit.
 
 # OVMF firmware path — auto-detected for macOS (Intel + Apple Silicon) and Linux.
 # On Apple Silicon (M1/M2/M3): brew install qemu installs OVMF at:
@@ -30,7 +33,7 @@ OVMF_CODE ?= $(shell \
 # This is slower than native but fully functional for UEFI development and testing.
 # Install with: brew install qemu  (brings OVMF firmware automatically)
 
-.PHONY: build build-debug esp qemu qemu-debug qemu-net qemu-nographic clean help setup-model
+.PHONY: build build-debug esp esp-img qemu qemu-debug qemu-net qemu-nographic clean help setup-model
 
 # build-std flags: required to compile core/alloc from source for the UEFI target.
 # These are passed explicitly here (not in .cargo/config.toml) so they don't
@@ -69,14 +72,51 @@ esp: build
 	fi
 	@echo "ESP created at $(ESP_DIR)/"
 	@echo ""
-	@echo "Before running, place model files in $(ESP_DIR)/models/:"
-	@echo "  - stories15m.bin  (model weights)"
-	@echo "  - tokenizer.bin   (tokenizer)"
-	@echo ""
-	@echo "Download from: https://huggingface.co/karpathy/tinyllamas/tree/main"
+	@echo "Model files in $(ESP_DIR)/models/:"
+	@if [ -f $(ESP_DIR)/models/gemma4-e2b.gguf ]; then \
+		echo "  ✓ gemma4-e2b.gguf  (Gemma 4 E2B — primary)"; \
+	else \
+		echo "  ✗ gemma4-e2b.gguf  (missing — download from huggingface.co/unsloth/gemma-4-E2B-it-GGUF)"; \
+	fi
+	@if [ -f $(ESP_DIR)/models/tokenizer.json ]; then \
+		echo "  ✓ tokenizer.json   (Gemma 4 tokenizer)"; \
+	else \
+		echo "  ✗ tokenizer.json   (missing — download from huggingface.co/google/gemma-4-E2B-it)"; \
+	fi
+	@if [ -f $(ESP_DIR)/models/stories15m.bin ]; then \
+		echo "  ✓ stories15m.bin   (fallback model)"; \
+	fi
+
+## Build a raw FAT32 disk image from the ESP directory.
+## Required because QEMU fat:rw has a 2GB per-file limit (breaks Gemma 4 GGUF).
+## First run: creates esp.img (6G FAT32) and copies ALL files (slow, ~1-2 min).
+## Subsequent runs: only updates the EFI binary (fast, <5s).
+esp-img: esp
+	@hdiutil detach /tmp/genos_esp 2>/dev/null || true
+	@if [ ! -f $(ESP_IMG) ]; then \
+		echo "[esp-img] First build: creating 6G FAT32 disk image (this takes ~1-2 min)..."; \
+		dd if=/dev/zero of=$(ESP_IMG) bs=1m count=6144 2>/dev/null; \
+		ATTACH_OUT=$$(hdiutil attach -nomount $(ESP_IMG)); \
+		DEV=$$(echo "$$ATTACH_OUT" | awk 'NR==1{print $$1}'); \
+		echo "[esp-img] Formatting $$DEV as FAT32..."; \
+		newfs_msdos -F 32 -v GENOS $$DEV; \
+		hdiutil detach $$DEV; \
+		hdiutil attach -mountpoint /tmp/genos_esp $(ESP_IMG); \
+		echo "[esp-img] Copying files (models may take a while)..."; \
+		cp -r $(ESP_DIR)/* /tmp/genos_esp/; \
+		hdiutil detach /tmp/genos_esp; \
+		echo "[esp-img] $(ESP_IMG) ready (FAT32, 6G)"; \
+	else \
+		echo "[esp-img] Updating EFI binary in existing esp.img..."; \
+		hdiutil attach -mountpoint /tmp/genos_esp $(ESP_IMG); \
+		mkdir -p /tmp/genos_esp/EFI/BOOT; \
+		cp $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI /tmp/genos_esp/EFI/BOOT/BOOTX64.EFI; \
+		hdiutil detach /tmp/genos_esp; \
+		echo "[esp-img] EFI binary updated"; \
+	fi
 
 ## Run in QEMU with OVMF (graphical, release build — fast)
-qemu: esp
+qemu: esp-img
 	@if [ "$(OVMF_CODE)" = "OVMF_NOT_FOUND" ]; then \
 		echo "ERROR: OVMF firmware not found."; \
 		echo "Install QEMU with: brew install qemu (macOS) or apt install ovmf (Linux)"; \
@@ -85,27 +125,30 @@ qemu: esp
 	qemu-system-x86_64 \
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 8G \
+		-drive format=raw,file=$(ESP_IMG) \
+		-m 6G \
 		-net none \
 		-serial stdio
 
 ## Run in QEMU with a debug build (slow, for debugging panics)
-qemu-debug:
+qemu-debug: esp-img
 	$(CARGO) build --target $(TARGET) -p genos-boot $(BUILD_STD)
-	@mkdir -p $(ESP_DIR)/EFI/BOOT
-	cp target/$(TARGET)/debug/genos-boot.efi $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
+	@hdiutil detach /tmp/genos_esp 2>/dev/null || true
+	@hdiutil attach -mountpoint /tmp/genos_esp $(ESP_IMG)
+	@mkdir -p /tmp/genos_esp/EFI/BOOT
+	cp target/$(TARGET)/debug/genos-boot.efi /tmp/genos_esp/EFI/BOOT/BOOTX64.EFI
+	@hdiutil detach /tmp/genos_esp
 	qemu-system-x86_64 \
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 8G \
+		-drive format=raw,file=$(ESP_IMG) \
+		-m 6G \
 		-net none \
 		-serial stdio
 
 ## Run in QEMU with user-mode networking (for Phase B HTTP HAL testing)
 ## Exposes host port 8080 inside the VM as port 80; adds e1000 NIC.
-qemu-net: esp
+qemu-net: esp-img
 	@if [ "$(OVMF_CODE)" = "OVMF_NOT_FOUND" ]; then \
 		echo "ERROR: OVMF firmware not found."; \
 		exit 1; \
@@ -113,14 +156,14 @@ qemu-net: esp
 	qemu-system-x86_64 \
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 8G \
+		-drive format=raw,file=$(ESP_IMG) \
+		-m 6G \
 		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
 		-device e1000,netdev=net0 \
 		-serial stdio
 
 ## Run in QEMU without graphics (serial console only)
-qemu-nographic: esp
+qemu-nographic: esp-img
 	@if [ "$(OVMF_CODE)" = "OVMF_NOT_FOUND" ]; then \
 		echo "ERROR: OVMF firmware not found."; \
 		exit 1; \
@@ -128,8 +171,8 @@ qemu-nographic: esp
 	qemu-system-x86_64 \
 		-cpu max \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=fat:rw:$(ESP_DIR) \
-		-m 8G \
+		-drive format=raw,file=$(ESP_IMG) \
+		-m 6G \
 		-net none \
 		-nographic
 
@@ -156,7 +199,7 @@ test-kernel:
 ## Clean build artifacts
 clean:
 	$(CARGO) clean
-	rm -rf $(ESP_DIR)
+	rm -rf $(ESP_DIR) $(ESP_IMG)
 
 ## Show help
 help:

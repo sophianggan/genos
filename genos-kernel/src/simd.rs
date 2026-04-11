@@ -426,6 +426,18 @@ pub fn embedding_lookup(
                 dequantize_q4_0(&data[boff..boff + 18], &mut out[b * 32..(b + 1) * 32]);
             }
         }
+        GGMLType::Q4K => {
+            let blocks = dim / Q4K_BLOCK_SIZE;
+            let row_bytes = blocks * Q4K_BLOCK_BYTES;
+            let base = idx * row_bytes;
+            for b in 0..blocks {
+                let boff = base + b * Q4K_BLOCK_BYTES;
+                dequantize_q4k(
+                    &data[boff..boff + Q4K_BLOCK_BYTES],
+                    &mut out[b * Q4K_BLOCK_SIZE..(b + 1) * Q4K_BLOCK_SIZE],
+                );
+            }
+        }
         _ => {
             for v in out.iter_mut() {
                 *v = 0.0;

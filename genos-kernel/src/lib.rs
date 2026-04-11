@@ -29,4 +29,8 @@ pub trait LLMRuntime {
     fn vocab_size(&self) -> usize;
     /// Maximum supported sequence length.
     fn max_seq_len(&self) -> usize;
+    /// Reset KV cache between independent sequences.
+    fn reset(&mut self);
+    /// Human-readable model name for the status bar.
+    fn model_name(&self) -> &str;
 }

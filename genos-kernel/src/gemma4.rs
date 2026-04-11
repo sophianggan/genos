@@ -242,13 +242,17 @@ impl RunState {
     fn new(config: &Gemma4Config) -> Self {
         let max_q = config.num_attention_heads * config.global_head_dim;
         let max_kv = config.num_kv_heads * config.global_head_dim;
+        // xb is used for both attention output (q_dim) and FFN input (hidden_size).
+        // q_dim = num_heads * head_dim, which is larger than hidden_size in Gemma 4:
+        //   sliding: 8 * 256 = 2048, full: 8 * 512 = 4096, vs hidden = 1536.
+        let xb_size = max_q.max(config.hidden_size);
         // Cap att buffer at 8192 tokens max (not full 128k context) to save ~4MB
         let initial_max_seq = 8192.min(config.max_position_embeddings);
         let max_att = config.num_attention_heads * initial_max_seq;
         RunState {
             x: vec![0.0; config.hidden_size],
-            xb: vec![0.0; config.hidden_size],
-            xb2: vec![0.0; config.hidden_size],
+            xb: vec![0.0; xb_size],
+            xb2: vec![0.0; xb_size],
             q: vec![0.0; max_q],
             k_temp: vec![0.0; max_kv],
             v_temp: vec![0.0; max_kv],
@@ -700,6 +704,14 @@ impl<'a> LLMRuntime for Gemma4Model<'a> {
 
     fn max_seq_len(&self) -> usize {
         self.config.max_position_embeddings
+    }
+
+    fn reset(&mut self) {
+        Gemma4Model::reset(self)
+    }
+
+    fn model_name(&self) -> &str {
+        "gemma4-e2b"
     }
 }
 

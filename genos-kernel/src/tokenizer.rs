@@ -29,6 +29,10 @@ pub struct Tokenizer {
     merges: Vec<(String, String)>,
     /// If true, merges take priority over scores for BPE.
     use_merges: bool,
+    /// BOS token ID (model-specific; 1 for llama2.c, 2 for Gemma).
+    pub bos_id: usize,
+    /// EOS token ID (model-specific; 2 for llama2.c, 1 for Gemma).
+    pub eos_id: usize,
 }
 
 impl Tokenizer {
@@ -46,6 +50,8 @@ impl Tokenizer {
                 vocab_size,
                 merges: Vec::new(),
                 use_merges: false,
+                bos_id: 1,
+                eos_id: 2,
             };
         }
 
@@ -78,6 +84,8 @@ impl Tokenizer {
             vocab_size,
             merges: Vec::new(),
             use_merges: false,
+            bos_id: 1,
+            eos_id: 2,
         }
     }
 
@@ -89,7 +97,7 @@ impl Tokenizer {
         let vocab_str = core::str::from_utf8(vocab_json).unwrap_or("{}");
         let merges_str = core::str::from_utf8(merges_txt).unwrap_or("");
 
-        // Parse vocab.json using our JSON parser
+        // Parse tokenizer.json (or vocab.json) using our JSON parser
         let vocab_val = match genos_kernel_json_parse(vocab_str) {
             Some(v) => v,
             None => {
@@ -101,19 +109,44 @@ impl Tokenizer {
                     vocab_size: 0,
                     merges: Vec::new(),
                     use_merges: false,
+                    bos_id: 1,
+                    eos_id: 2,
                 };
             }
         };
 
-        // Build vocab from JSON object {token: id}
+        // HuggingFace tokenizer.json has vocab at model.vocab.
+        // Plain vocab.json is a flat {token: id} dict at the root.
+        let vocab_obj = vocab_val
+            .get("model")
+            .and_then(|m| m.get("vocab"))
+            .and_then(|v| v.as_object())
+            .or_else(|| vocab_val.as_object());
+
         let mut max_id: usize = 0;
         let mut entries: Vec<(String, usize)> = Vec::new();
 
-        if let Some(obj) = vocab_val.as_object() {
+        if let Some(obj) = vocab_obj {
             for (token, id_val) in obj {
                 if let Some(id) = id_val.as_f64() {
                     let id = id as usize;
                     entries.push((token.clone(), id));
+                    if id > max_id {
+                        max_id = id;
+                    }
+                }
+            }
+        }
+
+        // Also include added_tokens (special tokens like <bos>, <eos>, <pad>).
+        if let Some(added) = vocab_val.get("added_tokens").and_then(|v| v.as_array()) {
+            for token_val in added {
+                if let (Some(id), Some(content)) = (
+                    token_val.get("id").and_then(|v| v.as_f64()),
+                    token_val.get("content").and_then(|v| v.as_str()),
+                ) {
+                    let id = id as usize;
+                    entries.push((alloc::string::String::from(content), id));
                     if id > max_id {
                         max_id = id;
                     }
@@ -137,33 +170,59 @@ impl Tokenizer {
             }
         }
 
-        // Parse merges.txt
+        // Parse merges: prefer HF tokenizer.json model.merges (array of "a b" strings),
+        // fall back to separate merges.txt file.
         let mut merges = Vec::new();
-        for line in merges_str.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some(space_pos) = line.find(' ') {
-                let a = String::from(&line[..space_pos]);
-                let b = String::from(&line[space_pos + 1..]);
-                merges.push((a, b));
+
+        if let Some(hf_merges) = vocab_val
+            .get("model")
+            .and_then(|m| m.get("merges"))
+            .and_then(|v| v.as_array())
+        {
+            for merge_val in hf_merges {
+                if let Some(s) = merge_val.as_str() {
+                    if let Some(space_pos) = s.find(' ') {
+                        let a = String::from(&s[..space_pos]);
+                        let b = String::from(&s[space_pos + 1..]);
+                        merges.push((a, b));
+                    }
+                }
             }
         }
 
-        // Assign scores: merges listed first have higher priority = higher score.
-        // Also assign scores so the BPE merge loop can use them.
-        // The merged token gets a score based on its merge rank.
+        if merges.is_empty() {
+            for line in merges_str.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some(space_pos) = line.find(' ') {
+                    let a = String::from(&line[..space_pos]);
+                    let b = String::from(&line[space_pos + 1..]);
+                    merges.push((a, b));
+                }
+            }
+        }
+
+        // Assign scores: earlier merges have higher priority (lower rank = higher score).
         for (rank, (a, b)) in merges.iter().enumerate() {
             let merged = format!("{}{}", a, b);
             if let Some(&id) = vocab_index.get(&merged) {
-                // Higher score for earlier merges (higher priority).
-                // Use negative rank so that lower rank = higher score.
                 scores[id] = -(rank as f32);
             }
         }
 
         let max_token_length = vocab.iter().map(|s| s.len()).max().unwrap_or(0);
+
+        // Detect BOS/EOS from known special token strings.
+        let bos_id = vocab_index.get("<bos>")
+            .or_else(|| vocab_index.get("<s>"))
+            .copied()
+            .unwrap_or(1);
+        let eos_id = vocab_index.get("<eos>")
+            .or_else(|| vocab_index.get("</s>"))
+            .copied()
+            .unwrap_or(2);
 
         Tokenizer {
             vocab,
@@ -173,6 +232,8 @@ impl Tokenizer {
             vocab_size,
             merges,
             use_merges: true,
+            bos_id,
+            eos_id,
         }
     }
 
@@ -182,7 +243,7 @@ impl Tokenizer {
         let mut tokens: Vec<usize> = Vec::new();
 
         if bos {
-            tokens.push(1); // BOS token
+            tokens.push(self.bos_id);
         }
 
         // If text is not empty, try to add the dummy prefix space token
@@ -239,7 +300,7 @@ impl Tokenizer {
         }
 
         if eos {
-            tokens.push(2); // EOS token
+            tokens.push(self.eos_id);
         }
 
         tokens.into_iter().map(|t| t as u32).collect()
@@ -258,9 +319,20 @@ impl Tokenizer {
             return piece;
         }
 
-        // Strip leading space after BOS
-        if prev_token == 1 && piece.starts_with(' ') {
-            return &piece[1..];
+        // Strip leading space after BOS (works for both regular ' ' and SentencePiece '▁')
+        if prev_token == self.bos_id as u32 {
+            if let Some(stripped) = piece.strip_prefix(' ') {
+                return stripped;
+            }
+            // SentencePiece space marker U+2581 (▁)
+            if let Some(stripped) = piece.strip_prefix('\u{2581}') {
+                return stripped;
+            }
+        }
+
+        // Replace SentencePiece space marker with regular space for non-BOS tokens
+        if piece.starts_with('\u{2581}') {
+            return &piece['\u{2581}'.len_utf8()..];
         }
 
         piece

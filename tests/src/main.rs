@@ -1740,3 +1740,93 @@ And also check the tool handlers.
         crate::cleanup(&root);
     }
 }
+
+// ──────────────────────────────────────────────────────────────────
+// 13. GEMMA 4 FORWARD PASS — integration test on real GGUF
+// Loads the actual gemma4-e2b.gguf from esp/models/, runs 5 forward
+// passes, and asserts the logits are finite and plausible.
+// Skip automatically if the model file is not present.
+// ──────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod test_gemma4_forward {
+    use genos_kernel::gemma4::Gemma4Model;
+    use genos_kernel::gguf::GGUFFile;
+    use genos_kernel::sampler::Sampler;
+    use genos_kernel::tokenizer::Tokenizer;
+
+    fn model_path() -> std::path::PathBuf {
+        // Look relative to the workspace root (genos/)
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop(); // up from tests/ to genos/
+        p.push("esp/models/gemma4-e2b.gguf");
+        p
+    }
+
+    fn tokenizer_path() -> std::path::PathBuf {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.push("esp/models/tokenizer.json");
+        p
+    }
+
+    #[test]
+    fn forward_pass_no_panic() {
+        let mp = model_path();
+        if !mp.exists() {
+            eprintln!("SKIP test_gemma4_forward: {} not found", mp.display());
+            return;
+        }
+
+        eprintln!("Loading GGUF from {} ...", mp.display());
+        let data = std::fs::read(&mp).expect("read gguf");
+        eprintln!("Loaded {} MB, parsing...", data.len() / (1024 * 1024));
+
+        let gguf = GGUFFile::parse(&data).expect("parse gguf");
+        eprintln!("Parsed: {} tensors, {} metadata entries", gguf.tensors.len(), gguf.metadata.len());
+
+        let mut model = Gemma4Model::from_gguf(&gguf).expect("build model");
+        let vocab_size = model.config.vocab_size;
+        eprintln!("Model built: {} layers, {} vocab", model.config.num_layers, vocab_size);
+
+        // Run 5 forward passes with token IDs 1,2,3,4,5
+        // (BOS token is 2 in Gemma tokenizer; anything in range is fine for testing)
+        for (pos, tok) in [2u32, 100, 200, 300, 400].iter().enumerate() {
+            let logits = model.forward_pass(*tok, pos);
+
+            assert_eq!(logits.len(), vocab_size, "logits length should be vocab_size");
+
+            // All logits must be finite (no NaN or Inf = forward pass is healthy)
+            let any_non_finite = logits.iter().any(|v| !v.is_finite());
+            assert!(!any_non_finite, "logits contain NaN or Inf at pos {}", pos);
+
+            // The logit distribution should have some spread (not all identical)
+            let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let min = logits.iter().cloned().fold(f32::INFINITY, f32::min);
+            assert!(max > min, "logits are all identical at pos {} (model not working)", pos);
+
+            eprintln!("  pos={} tok={} logit_range=[{:.3},{:.3}] OK", pos, tok, min, max);
+        }
+        eprintln!("All 5 forward passes passed.");
+    }
+
+    #[test]
+    fn tokenizer_encodes_and_decodes() {
+        let tp = tokenizer_path();
+        if !tp.exists() {
+            eprintln!("SKIP test_gemma4_forward::tokenizer: {} not found", tp.display());
+            return;
+        }
+
+        let vocab_data = std::fs::read(&tp).expect("read tokenizer.json");
+        let tokenizer = Tokenizer::load_hf(&vocab_data, &[]);
+
+        // Encode a simple prompt
+        let tokens = tokenizer.encode("Hello world", true, false);
+        assert!(!tokens.is_empty(), "tokenizer should produce tokens for 'Hello world'");
+        eprintln!("'Hello world' -> {} tokens: {:?}", tokens.len(), &tokens[..tokens.len().min(8)]);
+
+        // Decode back — should produce something non-empty
+        let piece = tokenizer.decode(tokens[0], tokens.get(1).copied().unwrap_or(1));
+        eprintln!("decode({}, {}) = {:?}", tokens[0], tokens.get(1).copied().unwrap_or(1), piece);
+    }
+}

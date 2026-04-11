@@ -5,6 +5,7 @@ use libm::{cosf, expf, sinf, sqrtf};
 use crate::config::ModelConfig;
 use crate::simd;
 use crate::weights::Weights;
+use crate::LLMRuntime;
 
 /// Runtime state buffers for transformer inference.
 struct RunState {
@@ -243,6 +244,28 @@ impl Transformer {
         );
 
         &self.state.logits
+    }
+}
+
+impl LLMRuntime for Transformer {
+    fn forward(&mut self, token: u32, pos: usize) -> &[f32] {
+        Transformer::forward(self, token, pos)
+    }
+
+    fn vocab_size(&self) -> usize {
+        self.config.vocab_size
+    }
+
+    fn max_seq_len(&self) -> usize {
+        self.config.seq_len
+    }
+
+    fn reset(&mut self) {
+        Transformer::reset(self)
+    }
+
+    fn model_name(&self) -> &str {
+        "stories15m"
     }
 }
 
