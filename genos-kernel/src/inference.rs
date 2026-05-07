@@ -3,7 +3,9 @@ use alloc::vec::Vec;
 use libm::{cosf, expf, sinf, sqrtf};
 
 use crate::config::ModelConfig;
+use crate::simd;
 use crate::weights::Weights;
+use crate::LLMRuntime;
 
 /// Runtime state buffers for transformer inference.
 struct RunState {
@@ -99,12 +101,8 @@ impl Transformer {
             {
                 let wk = self.weights.wk(l, dim, kv_dim);
                 for i in 0..kv_dim {
-                    let mut val = 0.0f32;
-                    let row = &wk[i * dim..(i + 1) * dim];
-                    for j in 0..dim {
-                        val += row[j] * self.state.xb[j];
-                    }
-                    self.state.key_cache[kv_start + i] = val;
+                    self.state.key_cache[kv_start + i] =
+                        simd::dot_f32(&wk[i * dim..(i + 1) * dim], &self.state.xb[..dim]);
                 }
             }
 
@@ -112,12 +110,8 @@ impl Transformer {
             {
                 let wv = self.weights.wv(l, dim, kv_dim);
                 for i in 0..kv_dim {
-                    let mut val = 0.0f32;
-                    let row = &wv[i * dim..(i + 1) * dim];
-                    for j in 0..dim {
-                        val += row[j] * self.state.xb[j];
-                    }
-                    self.state.value_cache[kv_start + i] = val;
+                    self.state.value_cache[kv_start + i] =
+                        simd::dot_f32(&wv[i * dim..(i + 1) * dim], &self.state.xb[..dim]);
                 }
             }
 
@@ -152,12 +146,11 @@ impl Transformer {
                 // Compute attention scores for all cached positions
                 for t in 0..=pos {
                     let k_off = loff + t * kv_dim + (h / kv_mul) * head_size;
-                    let mut score = 0.0f32;
-                    for i in 0..head_size {
-                        score += self.state.q[q_off + i] * self.state.key_cache[k_off + i];
-                    }
-                    score /= sqrtf(head_size as f32);
-                    self.state.att[att_off + t] = score;
+                    let score = simd::dot_f32(
+                        &self.state.q[q_off..q_off + head_size],
+                        &self.state.key_cache[k_off..k_off + head_size],
+                    );
+                    self.state.att[att_off + t] = score / sqrtf(head_size as f32);
                 }
 
                 // Softmax over attention scores [0..=pos]
@@ -171,9 +164,11 @@ impl Transformer {
                 for t in 0..=pos {
                     let v_off = loff + t * kv_dim + (h / kv_mul) * head_size;
                     let a = self.state.att[att_off + t];
-                    for i in 0..head_size {
-                        self.state.xb[xb_off + i] += a * self.state.value_cache[v_off + i];
-                    }
+                    simd::fmadd_scalar(
+                        &mut self.state.xb[xb_off..xb_off + head_size],
+                        &self.state.value_cache[v_off..v_off + head_size],
+                        a,
+                    );
                 }
             }
 
@@ -232,13 +227,10 @@ impl Transformer {
         // Final RMSNorm (in-place on x, using xb as temp)
         {
             let w = self.weights.rms_final_weight(dim);
-            let mut ss = 0.0f32;
+            let ss = simd::dot_f32(&self.state.x[..dim], &self.state.x[..dim]);
+            let inv_rms = 1.0 / sqrtf(ss / dim as f32 + 1e-5);
             for i in 0..dim {
-                ss += self.state.x[i] * self.state.x[i];
-            }
-            ss = 1.0 / sqrtf(ss / dim as f32 + 1e-5);
-            for i in 0..dim {
-                self.state.x[i] = w[i] * (ss * self.state.x[i]);
+                self.state.x[i] = w[i] * (inv_rms * self.state.x[i]);
             }
         }
 
@@ -255,32 +247,47 @@ impl Transformer {
     }
 }
 
+impl LLMRuntime for Transformer {
+    fn forward(&mut self, token: u32, pos: usize) -> &[f32] {
+        Transformer::forward(self, token, pos)
+    }
+
+    fn vocab_size(&self) -> usize {
+        self.config.vocab_size
+    }
+
+    fn max_seq_len(&self) -> usize {
+        self.config.seq_len
+    }
+
+    fn reset(&mut self) {
+        Transformer::reset(self)
+    }
+
+    fn model_name(&self) -> &str {
+        "stories15m"
+    }
+}
+
 // --- Math utilities ---
 
 /// RMSNorm: out[i] = weight[i] * (x[i] / rms(x))
 fn rmsnorm(out: &mut [f32], x: &[f32], weight: &[f32]) {
     let n = x.len();
-    let mut ss = 0.0f32;
+    let ss = simd::dot_f32(x, x); // sum of squares
+    let inv_rms = 1.0 / sqrtf(ss / n as f32 + 1e-5);
     for i in 0..n {
-        ss += x[i] * x[i];
-    }
-    ss = 1.0 / sqrtf(ss / n as f32 + 1e-5);
-    for i in 0..n {
-        out[i] = weight[i] * (ss * x[i]);
+        out[i] = weight[i] * (inv_rms * x[i]);
     }
 }
 
 /// Matrix-vector multiply: out = W * x
 /// W is (d, n) stored row-major: W[i*n + j]
 /// x is (n,), out is (d,)
+/// Uses AVX2+FMA dot product on x86_64 for ~4× throughput.
 fn matmul(out: &mut [f32], x: &[f32], w: &[f32], n: usize, d: usize) {
     for i in 0..d {
-        let mut val = 0.0f32;
-        let row_start = i * n;
-        for j in 0..n {
-            val += w[row_start + j] * x[j];
-        }
-        out[i] = val;
+        out[i] = simd::dot_f32(&w[i * n..(i + 1) * n], &x[..n]);
     }
 }
 

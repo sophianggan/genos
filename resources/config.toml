@@ -2,20 +2,23 @@
 # Loaded at boot from \system\config.toml
 
 [sampling]
-temperature = 1.0
+temperature = 0.7
 top_p = 0.9
+top_k = 64
+min_p = 0.05
+rep_penalty = 1.1
 
 [context]
-# Maximum context budget in tokens (Stories15M: 256)
-budget = 256
+# Context budget in tokens (Gemma 4 E2B supports 128k; use 8192 for QEMU)
+budget = 8192
 # Pre-compact threshold (percentage of budget)
 compact_threshold = 80
 
 [model]
-name = "stories15m"
-path = "\\models\\stories15m.bin"
-tokenizer_path = "\\models\\tokenizer.bin"
+name = "gemma4-e2b"
+path = "\\models\\gemma4-e2b.gguf"
+tokenizer_path = "\\models\\tokenizer.json"
 
 [system]
 version = "0.1.0"
-phase = "B"
+phase = "D"

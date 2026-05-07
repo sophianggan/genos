@@ -38,13 +38,24 @@ The separation means `genos-kernel` has no dependency on UEFI at all — it comp
 
 **Phase A–C:** [Stories15M](https://huggingface.co/karpathy/tinyllamas) — a 15M-parameter Llama 2 model in the llama2.c binary format. Tiny, fast to load, good for proving the boot + inference pipeline works.
 
-**Phase D+:** [Gemma 4 E2B](https://huggingface.co/google/gemma-4-E2B-it) — Google's 2.3B effective parameter edge model (5.1B total with Per-Layer Embeddings). Designed for phones and edge devices. At int4 quantization it needs ~3.2 GB RAM. It has native function calling, reasoning (thinking mode), 128k context, and multimodal input (text + image + audio). This is what genos will run in production.
+**Phase D (current):** [Gemma 4 E2B](https://huggingface.co/google/gemma-4-E2B-it) — Google's 2.3B effective parameter edge model (5.1B total with Per-Layer Embeddings). 35 layers, 262k vocab, 128k context. Hybrid sliding-window (512) + full attention (every 5th layer). 8:1 GQA. GeGLU FFN. At int4 quantization it needs ~3.2 GB RAM. Native function calling, reasoning (thinking mode). Full forward pass implemented with TurboQuant (PolarQuant weights + QJL-compressed KV cache).
 
 ---
 
 ## Current state
 
-Phase A is done and the EFI binary builds clean:
+Phases A through D are done. The kernel now includes both the original Stories15M Llama 2 runtime and the full Gemma 4 E2B forward pass with TurboQuant quantization.
+
+**Test status**: 23 kernel unit tests + 86 integration tests = **109 tests passing**.
+
+Phase D additions (~1,770 LOC across 4 new files + 2 modified):
+- `gguf.rs` — GGUF v3 parser (metadata, tensor info, aligned data extraction)
+- `simd.rs` — Quantized math: F16/BF16/Q4_0/Q8_0/Q4_K dequant + matmul, GELU, RMSNorm, RoPE, softmax, logit softcapping, PolarQuant
+- `kv_cache.rs` — QJL-compressed KV cache (3-bit keys ~9× compression, 2-bit values ~13× compression, sliding window)
+- `gemma4.rs` — Complete Gemma 4 E2B forward pass (PLE injection, hybrid attention, p-RoPE, GQA, GeGLU, logit softcapping)
+- `sampler.rs` — Extended with top-k, min-p, repetition penalty
+
+The EFI binary builds clean:
 
 ```
 genos-boot.efi   467 KB   x86_64 UEFI application
@@ -82,14 +93,22 @@ Turn the prototype into a real OS environment:
 - Conversation journal: every turn logged to `\logs\journal.jsonl`, loaded on next boot
 - Improved TUI: status bar (model, tokens/sec, RAM), scrollable output, input editing
 
-### Phase D — Gemma 4 E2B + Quantization
+### Phase D — Gemma 4 E2B + Quantization (done)
 
-Upgrade to a real model:
-- GGUF loader for Gemma 4 E2B architecture: hybrid local/global attention, Per-Layer Embeddings, 262k vocab
-- QJL quantized KV-cache (3-bit keys, 2-bit values) — ~5-6x memory savings
-- int4 matmul kernels with AVX2 SIMD via `core::arch::x86_64`
-- Top-k/top-p/temperature sampling, repetition penalty, configurable via `\system\config.toml`
-- Native function calling: Gemma 4 E2B has built-in tool use support — the model directly emits structured tool calls without prompt engineering
+Replace Stories15M with a real instruction-following model:
+- GGUF v3 loader: parse magic, version, metadata, tensor info, aligned data — supports all GGML quant types (F32, F16, BF16, Q4_0, Q8_0, Q4_K, PolarQuant)
+- Complete Gemma 4 E2B forward pass (35 layers, 262k vocab, 128k context):
+  - Per-Layer Embeddings (PLE) injection at every transformer block
+  - Hybrid attention: 4 sliding-window (window=512) + 1 full attention (every 5th layer)
+  - p-RoPE: standard theta=10000 for sliding layers, theta=1M with partial_rotary_factor=0.25 for full layers
+  - 8:1 GQA (8 query heads, 1 KV head per layer)
+  - GeGLU FFN (GELU gate × up → down) with double-wide intermediate
+  - Logit softcapping at 30.0
+- TurboQuant — two complementary compression systems:
+  - **PolarQuant** (weights): polar coordinate decomposition, dequantize-on-the-fly during matmul
+  - **QJL** (KV cache): 3-bit key compression (~9× savings), 2-bit value compression (~13× savings), sliding window support
+- Sampling upgrades: top-k, min-p, repetition penalty (configurable via `\system\config.toml`)
+- Native function calling: Gemma 4 E2B has built-in tool use — directly emits structured tool calls
 
 ### Phase E — Agentic Environment
 
@@ -181,6 +200,21 @@ make test
 ```
 
 This compiles with `--features hosted` which enables `std` and runs tests for the transformer math, tokenizer, and sampler.
+
+The workspace `.cargo/config.toml` sets `x86_64-unknown-uefi` as the default target. If you run kernel tests directly with cargo, you must specify the host target explicitly:
+
+```bash
+# macOS (Apple Silicon)
+cargo test -p genos-kernel --features hosted --target aarch64-apple-darwin
+
+# macOS (Intel)
+cargo test -p genos-kernel --features hosted --target x86_64-apple-darwin
+
+# Linux x86_64
+cargo test -p genos-kernel --features hosted --target x86_64-unknown-linux-gnu
+```
+
+The integration tests in `tests/` already have their own `.cargo/config.toml` and work with `cargo test` directly.
 
 ### Adding a new tool
 

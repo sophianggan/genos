@@ -7,9 +7,13 @@ extern crate alloc;
 extern crate std as alloc;
 
 pub mod config;
+pub mod gemma4;
+pub mod gguf;
 pub mod inference;
 pub mod json;
+pub mod kv_cache;
 pub mod sampler;
+pub mod simd;
 pub mod sysconfig;
 pub mod tokenizer;
 pub mod weights;
@@ -25,4 +29,8 @@ pub trait LLMRuntime {
     fn vocab_size(&self) -> usize;
     /// Maximum supported sequence length.
     fn max_seq_len(&self) -> usize;
+    /// Reset KV cache between independent sequences.
+    fn reset(&mut self);
+    /// Human-readable model name for the status bar.
+    fn model_name(&self) -> &str;
 }

@@ -3,3 +3,9 @@
 # (e.g., tests/) that build for the host platform.
 [build]
 target = "x86_64-unknown-uefi"
+
+# NOTE: We do NOT set global target-feature flags here because -Z build-std
+# applies them to compiler_builtins/core which breaks f16/f128 codegen.
+# Instead, AVX2+FMA is enabled per-function via #[target_feature(enable = "avx2,fma")]
+# in genos-kernel/src/simd.rs.  This is safe because genos requires
+# Haswell+ (2013+) which always has AVX2+FMA.

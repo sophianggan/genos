@@ -4,7 +4,7 @@
 **The LLM *is* the OS.** Boot directly from USB via UEFI (no Linux, Windows, or BSD ever), load a quantized instruction model, and expose a TUI shell where the LLM makes every decision through structured tool calls, persistent memory, and agentic reasoning.
 
 **Repo**: https://github.com/n33levo/genos  
-**Status**: Phase A+B+C complete, D-E planned  
+**Status**: Phase A+B+C+D complete, E planned  
 **Stack**: Rust nightly · `x86_64-unknown-uefi` · `#![no_std]` + `core` + `alloc` · `uefi = "0.37"` · `libm = "0.2"`
 
 ---
@@ -535,9 +535,24 @@ consolidation pass, project wings + tunnels, cross-session continuity, input his
 
 ---
 
-### Phase D — Gemma 4 E2B + Quantization
+### ✅ Phase D — Gemma 4 E2B + Quantization (COMPLETE)
 
 **Goal**: Replace Stories15M with a real instruction-following model. *Depends on Phase C; GGUF loader can start parallel with C.*
+
+**Status**: All 8 deliverables implemented. ~1,770 LOC across 4 new kernel files + 2 modified files. 23 kernel unit tests + 86 integration tests = 109 passing, zero warnings.
+
+**What shipped**:
+- GGUF v3 parser (`gguf.rs`, ~400 LOC): header, metadata, tensor info, aligned data section, all GGML quant types
+- Quantized math engine (`simd.rs`, ~530 LOC): F16/BF16 conversion, Q4_0/Q8_0/Q4_K dequant + vec_dot, blocked matmul dispatcher, embedding lookup, GELU (tanh variant), RMSNorm, softmax, logit softcapping, RoPE with configurable theta+rotary_dim, PolarQuant (polar coordinate decomposition with runtime trig LUTs)
+- QJL KV cache (`kv_cache.rs`, ~290 LOC): 3-bit key compression (~9× savings), 2-bit value compression (~13× savings), per-layer storage with sliding window support, memory estimation
+- Gemma 4 E2B forward pass (`gemma4.rs`, ~550 LOC): config from GGUF metadata or hardcoded defaults, PLE injection, hybrid sliding-window (512) + full attention (every 5th layer), p-RoPE (theta=10k standard / theta=1M with partial_rotary_factor=0.25), 8:1 GQA, GeGLU FFN (double-wide), logit softcapping (30.0), implements LLMRuntime trait
+- Sampling upgrades (`sampler.rs`): top-k, min-p, repetition penalty, full pipeline: temperature → softmax → top-k → min-p → top-p → sample
+
+**Architecture corrections vs original spec** (verified against actual HuggingFace config.json):
+- sliding_window = 512 (not 4096)
+- Full attention layers every 5th (indices 4,9,14,19,24,29,34), not every 6th
+- head_dim = 256 (sliding) / 512 (full), not uniform
+- num_key_value_heads = 1 (8:1 GQA), not 8
 
 **Target model**: **Gemma 4 E2B** (`google/gemma-4-E2B-it`)
 - 2.3B effective / 5.1B total parameters
