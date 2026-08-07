@@ -3,6 +3,7 @@
 
 CARGO = cargo
 TARGET = x86_64-unknown-uefi
+HOST_TARGET = $(shell rustc -vV | grep host | cut -d' ' -f2)
 BUILD_DIR = target/$(TARGET)/release
 EFI_BINARY = $(BUILD_DIR)/genos-boot.efi
 ESP_DIR = esp
@@ -33,7 +34,7 @@ OVMF_CODE ?= $(shell \
 # This is slower than native but fully functional for UEFI development and testing.
 # Install with: brew install qemu  (brings OVMF firmware automatically)
 
-.PHONY: build build-debug esp esp-img qemu qemu-debug qemu-net qemu-nographic clean help setup-model
+.PHONY: build build-debug bridge-build bridge-test esp esp-img qemu qemu-debug qemu-net qemu-nographic clean help setup-model
 
 # build-std flags: required to compile core/alloc from source for the UEFI target.
 # These are passed explicitly here (not in .cargo/config.toml) so they don't
@@ -47,6 +48,14 @@ build:
 ## Build debug binary (slow, for development only)
 build-debug:
 	$(CARGO) build --target $(TARGET) -p genos-boot $(BUILD_STD)
+
+## Build the hosted stdio-to-HTTP MCP companion.
+bridge-build:
+	$(CARGO) build --manifest-path bridge/Cargo.toml --target $(HOST_TARGET) --release
+
+## Run structural tests for the hosted MCP companion.
+bridge-test:
+	$(CARGO) test --manifest-path bridge/Cargo.toml --target $(HOST_TARGET)
 
 ## Create the ESP (EFI System Partition) directory structure
 esp: build
@@ -210,6 +219,8 @@ help:
 	@echo "  make build          - Build the UEFI binary (release)"
 	@echo "  make build-debug    - Build the UEFI binary (debug)"
 	@echo "  make esp            - Create ESP directory with binary + palace"
+	@echo "  make bridge-build   - Build the hosted MCP stdio bridge"
+	@echo "  make bridge-test    - Test the hosted MCP stdio bridge"
 	@echo "  make setup-model    - Download Stories15M model + tokenizer"
 	@echo "  make qemu           - Run in QEMU (graphical, no network)"
 	@echo "  make qemu-net       - Run in QEMU with networking (Phase B)"
