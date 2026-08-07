@@ -2,11 +2,15 @@
 
 extern crate alloc;
 
+pub mod client;
 pub mod config;
 pub mod primitives;
 pub mod transport;
 pub mod wire;
 
+pub use client::{
+    ClientError, ClientManager, ClientState, ClientStatus, Discovery, ServerIdentity,
+};
 pub use config::{
     AuthConfig, ConfigError, CredentialRef, McpConfig, McpDefaults, ServerConfig, TransportKind,
     TrustLevel,
