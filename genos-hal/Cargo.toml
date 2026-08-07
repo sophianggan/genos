@@ -9,5 +9,6 @@ hosted = ["dep:native-tls"]
 
 [dependencies]
 uefi = { version = "0.37", features = ["alloc"] }
+uefi-raw = "0.14"
 log = "0.4"
 native-tls = { version = "0.2.18", optional = true }

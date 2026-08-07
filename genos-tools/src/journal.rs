@@ -100,4 +100,15 @@ impl TurnRecord {
     }
 }
 
-
+/// Append a redacted MCP audit event to the session journal. Arguments,
+/// results, credentials, and endpoint URLs are intentionally excluded.
+pub fn log_mcp_event(session_id: &str, server_id: &str, operation: &str, outcome: &str) {
+    let event = json_object(&[
+        ("event_type", JsonValue::Str(String::from("mcp"))),
+        ("session_id", JsonValue::Str(String::from(session_id))),
+        ("server_id", JsonValue::Str(String::from(server_id))),
+        ("operation", JsonValue::Str(String::from(operation))),
+        ("outcome", JsonValue::Str(String::from(outcome))),
+    ]);
+    palace::append_session_journal(session_id, &event.to_json_string());
+}

@@ -6,7 +6,8 @@ edition = "2021"
 [dependencies]
 genos-hal = { path = "../genos-hal" }
 genos-kernel = { path = "../genos-kernel" }
+genos-mcp = { path = "../genos-mcp" }
 
 [features]
 default = []
-hosted = ["genos-hal/hosted", "genos-kernel/std"]
+hosted = ["genos-hal/hosted", "genos-kernel/std", "genos-mcp/hosted"]

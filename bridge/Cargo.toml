@@ -1,0 +1,12 @@
+[package]
+name = "genos-mcp-bridge"
+version = "0.1.0"
+edition = "2021"
+
+# The bridge is a hosted companion and intentionally not part of the UEFI
+# workspace. It has its own target and lock file.
+[workspace]
+
+[dependencies]
+genos-kernel = { path = "../genos-kernel", features = ["std"] }
+genos-mcp = { path = "../genos-mcp", features = ["hosted"] }

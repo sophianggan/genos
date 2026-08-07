@@ -1,0 +1,27 @@
+{
+  "resultType": "complete",
+  "tools": [
+    {
+      "name": "lookup",
+      "description": "Look up a record",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "write_record",
+      "description": "Write a record",
+      "inputSchema": { "type": "object" },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    }
+  ],
+  "ttlMs": 30000,
+  "cacheScope": "private"
+}

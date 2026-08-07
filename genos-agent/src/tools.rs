@@ -9,6 +9,7 @@ use genos_tools::protocol::{ToolCall, ToolResult};
 use genos_tools::graph::EntityGraph;
 use genos_tools::search::SearchIndex;
 use crate::policy::{PolicyCheck, PolicyEngine};
+use crate::mcp::McpRuntime;
 
 /// Execute a tool call, checking policy first.
 pub fn execute(
@@ -18,6 +19,7 @@ pub fn execute(
     turn: usize,
     index: &mut SearchIndex,
     graph: &mut EntityGraph,
+    mcp: &mut McpRuntime,
 ) -> ToolResult {
     // Check policy
     match policy.check(&call.tool) {
@@ -57,7 +59,7 @@ pub fn execute(
     // Dispatch to handler
     let mut result = dispatch(
         &call.tool, &call.args, &call.call_id, timestamp,
-        &call.session_id, turn, index, graph,
+        &call.session_id, turn, index, graph, mcp,
     );
 
     // Set elapsed time
@@ -77,6 +79,7 @@ fn dispatch(
     turn: usize,
     index: &mut SearchIndex,
     graph: &mut EntityGraph,
+    mcp: &mut McpRuntime,
 ) -> ToolResult {
     match tool {
         "fs.read" => genos_tools::fs::tool_read(args, call_id),
@@ -110,6 +113,12 @@ fn dispatch(
         "palace.find_tunnels" => genos_tools::palace::tool_find_tunnels(args, call_id),
         "sys.clock" => genos_tools::sys::tool_clock(args, call_id),
         "sys.introspect" => genos_tools::sys::tool_introspect(args, call_id),
+        "mcp.servers" => mcp.servers(call_id),
+        "mcp.connect" => mcp.connect(args, call_id),
+        "mcp.tools" => mcp.tools(args, call_id),
+        "mcp.call" => mcp.call(args, call_id, genos_hal::timer::now_ms()),
+        "mcp.resource" => mcp.read_resource(args, call_id),
+        "mcp.prompt" => mcp.get_prompt(args, call_id),
         _ => ToolResult::failure(
             call_id,
             "unknown_tool",

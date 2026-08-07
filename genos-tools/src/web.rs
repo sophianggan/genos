@@ -4,7 +4,7 @@
 //! HTML tag stripping (~200 LOC, no external crate).
 //! Semantic chunk extraction into typed segments.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use alloc::format;

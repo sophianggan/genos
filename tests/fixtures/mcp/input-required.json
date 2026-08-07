@@ -1,0 +1,11 @@
+{
+  "resultType": "input_required",
+  "inputRequests": {
+    "confirm": {
+      "type": "elicitation",
+      "message": "Write the record?",
+      "schema": { "type": "boolean" }
+    }
+  },
+  "requestState": "opaque-continuation-state"
+}

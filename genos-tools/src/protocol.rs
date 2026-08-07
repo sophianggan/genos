@@ -257,6 +257,44 @@ impl ToolRegistry {
             description: "Get system status (RAM, context, uptime)",
             params: &[],
         });
+        reg.register(ToolSpec {
+            name: "mcp.servers",
+            description: "List configured MCP servers and connection status",
+            params: &[],
+        });
+        reg.register(ToolSpec {
+            name: "mcp.connect",
+            description: "Discover an MCP server and cache its primitive catalog",
+            params: &[("server", "configured server ID")],
+        });
+        reg.register(ToolSpec {
+            name: "mcp.tools",
+            description: "List namespaced tools discovered from MCP servers",
+            params: &[("server", "optional server ID filter")],
+        });
+        reg.register(ToolSpec {
+            name: "mcp.call",
+            description: "Call an approved tool on a configured MCP server",
+            params: &[
+                ("server", "configured server ID"),
+                ("name", "remote tool name"),
+                ("arguments", "remote tool arguments object"),
+            ],
+        });
+        reg.register(ToolSpec {
+            name: "mcp.resource",
+            description: "Read a resource from a configured MCP server",
+            params: &[("server", "configured server ID"), ("uri", "resource URI")],
+        });
+        reg.register(ToolSpec {
+            name: "mcp.prompt",
+            description: "Get a prompt template from a configured MCP server",
+            params: &[
+                ("server", "configured server ID"),
+                ("name", "remote prompt name"),
+                ("arguments", "prompt arguments object"),
+            ],
+        });
         reg
     }
 }

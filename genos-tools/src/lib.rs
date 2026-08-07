@@ -9,6 +9,7 @@ extern crate std as alloc;
 pub mod fs;
 pub mod graph;
 pub mod journal;
+pub mod mcp_transport;
 pub mod memory;
 pub mod net;
 pub mod palace;

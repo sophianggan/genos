@@ -71,6 +71,14 @@ impl PolicyEngine {
         // Net — allowed (gracefully degrades)
         policies.insert(String::from("net.fetch"), ToolPolicy::default_allowed());
 
+        // MCP management is host-checked again by the MCP policy firewall.
+        policies.insert(String::from("mcp.servers"), ToolPolicy::default_allowed());
+        policies.insert(String::from("mcp.connect"), ToolPolicy::default_allowed());
+        policies.insert(String::from("mcp.tools"), ToolPolicy::default_allowed());
+        policies.insert(String::from("mcp.call"), ToolPolicy::default_allowed());
+        policies.insert(String::from("mcp.resource"), ToolPolicy::default_allowed());
+        policies.insert(String::from("mcp.prompt"), ToolPolicy::default_allowed());
+
         // Destructive tools — require approval
         policies.insert(String::from("fs.delete"), ToolPolicy::default_protected());
 
