@@ -1,0 +1,11 @@
+[package]
+name = "genos-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+genos-kernel = { path = "../genos-kernel" }
+
+[features]
+default = []
+hosted = ["genos-kernel/std"]

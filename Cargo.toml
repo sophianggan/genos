@@ -3,6 +3,7 @@ members = [
     "genos-boot",
     "genos-hal",
     "genos-kernel",
+    "genos-mcp",
     "genos-tools",
     "genos-agent",
 ]
