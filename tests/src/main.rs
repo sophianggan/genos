@@ -16,6 +16,368 @@ fn cleanup(root: &str) {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// MCP PLATFORM — structural protocol, isolation, and policy contracts
+// ──────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod test_mcp_platform {
+    use genos_kernel::json::{parse, JsonValue};
+    use genos_mcp::client::ClientStatus;
+    use genos_mcp::execution::CallOutcome;
+    use genos_mcp::primitives::{Catalog, Page, ServerCatalog, Tool};
+    use genos_mcp::security::{ApprovalGrant, PolicyDecision, PolicyFirewall};
+    use genos_mcp::server::{
+        McpServer, McpService, RoutingMetadata, ServerCapabilities, ServerInfo,
+    };
+    use genos_mcp::transport::{
+        Header, HttpRequest, HttpResponse, HttpTransport, McpHttpClient, TransportError,
+        TransportErrorKind,
+    };
+    use genos_mcp::wire::{method, ClientIdentity, RequestId, RequestMetadata, RpcRequest, RpcResponse};
+    use genos_mcp::{AuthConfig, McpConfig, McpError, LATEST_PROTOCOL_VERSION};
+
+    const DISCOVER: &str = include_str!("../fixtures/mcp/discover.json");
+    const TOOLS_LIST: &str = include_str!("../fixtures/mcp/tools-list.json");
+    const INPUT_REQUIRED: &str = include_str!("../fixtures/mcp/input-required.json");
+    const UNSUPPORTED: &str = include_str!("../fixtures/mcp/unsupported-version.json");
+
+    fn endpoint_config() -> McpConfig {
+        McpConfig::parse(
+            br#"
+            [defaults]
+            timeout_ms = 7000
+            max_response_bytes = 8192
+            require_approval = true
+
+            [[servers]]
+            id = "records"
+            endpoint = "https://records.example/mcp"
+            auth = "bearer"
+            credential_ref = "file:\\secrets\\records.token"
+            trust = "untrusted"
+
+            [[servers]]
+            id = "local"
+            transport = "stdio_bridge"
+            endpoint = "http://127.0.0.1:8787/mcp"
+            auth = "none"
+            trust = "read_only"
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn tool_page() -> Page<Tool> {
+        Page::<Tool>::tools(&parse(TOOLS_LIST).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn config_is_provider_neutral_and_secret_referenced() {
+        let config = endpoint_config();
+        assert_eq!(config.servers.len(), 2);
+        assert_eq!(config.servers[0].timeout_ms, 7000);
+        assert!(matches!(config.servers[0].auth, AuthConfig::Bearer { .. }));
+        assert!(config.servers[0].is_authenticated());
+        assert!(!config.servers[1].is_authenticated());
+    }
+
+    #[test]
+    fn config_rejects_raw_and_duplicate_credentials_structure() {
+        let raw = br#"
+            [[servers]]
+            id = "bad"
+            endpoint = "https://example.com/mcp"
+            auth = "bearer"
+            credential_ref = "literal-secret"
+        "#;
+        assert!(McpConfig::parse(raw).is_err());
+        assert!(genos_mcp::CredentialRef::parse("token-without-provider").is_err());
+    }
+
+    #[test]
+    fn every_modern_request_carries_identity_version_and_capabilities() {
+        let request = RpcRequest::discover(
+            RequestId::String("discover-1".into()),
+            &RequestMetadata::modern(ClientIdentity::genos()),
+        );
+        let metadata = request.params.get("_meta").unwrap();
+        assert_eq!(
+            metadata
+                .get("io.modelcontextprotocol/protocolVersion")
+                .unwrap()
+                .as_str(),
+            Some(LATEST_PROTOCOL_VERSION)
+        );
+        assert!(metadata.get("io.modelcontextprotocol/clientInfo").is_some());
+        assert!(metadata
+            .get("io.modelcontextprotocol/clientCapabilities")
+            .is_some());
+    }
+
+    #[test]
+    fn unsupported_version_fixture_maps_to_typed_protocol_error() {
+        let response = RpcResponse::from_json(&parse(UNSUPPORTED).unwrap()).unwrap();
+        assert_eq!(
+            response.error.unwrap().code,
+            McpError::UNSUPPORTED_PROTOCOL_VERSION
+        );
+    }
+
+    #[test]
+    fn client_manager_keeps_one_state_boundary_per_endpoint() {
+        let manager = genos_mcp::ClientManager::from_config(&endpoint_config());
+        assert_eq!(manager.len(), 2);
+        assert_eq!(
+            manager.client("records").unwrap().status,
+            ClientStatus::Configured
+        );
+        assert_ne!(
+            manager.client("records").unwrap().server.endpoint,
+            manager.client("local").unwrap().server.endpoint
+        );
+    }
+
+    #[test]
+    fn catalogs_namespace_colliding_remote_tool_names() {
+        let tool = tool_page().items.remove(0);
+        let mut left = ServerCatalog::new("left");
+        left.tools.push(tool.clone());
+        let mut right = ServerCatalog::new("right");
+        right.tools.push(tool);
+        let mut catalog = Catalog::new();
+        catalog.replace(left);
+        catalog.replace(right);
+        let names: Vec<String> = catalog
+            .tools()
+            .into_iter()
+            .map(|entry| entry.exposed_name)
+            .collect();
+        assert_eq!(names, vec!["mcp.left.lookup", "mcp.right.lookup"]);
+    }
+
+    #[test]
+    fn discovery_fixture_enables_only_advertised_primitive_lists() {
+        let mut manager = genos_mcp::ClientManager::from_config(&endpoint_config());
+        let client = manager.client_mut("records").unwrap();
+        let request = client.discover_request().unwrap();
+        client
+            .accept_discovery(&RpcResponse::success(
+                request.id,
+                parse(DISCOVER).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(client.status, ClientStatus::Ready);
+        let methods: Vec<String> = client
+            .list_requests()
+            .unwrap()
+            .into_iter()
+            .map(|request| request.method)
+            .collect();
+        assert_eq!(
+            methods,
+            vec![
+                method::TOOLS_LIST,
+                method::RESOURCES_LIST,
+                method::PROMPTS_LIST
+            ]
+        );
+    }
+
+    #[test]
+    fn list_ingestion_preserves_schema_and_deterministic_order() {
+        let page = tool_page();
+        assert_eq!(page.items[0].name, "lookup");
+        assert!(page.items[0].input_schema.get("properties").is_some());
+        assert_eq!(page.ttl_ms, Some(30_000));
+        assert_eq!(page.items[1].annotations.as_ref().unwrap()
+            .get("destructiveHint").unwrap().as_bool(), Some(true));
+    }
+
+    #[test]
+    fn input_required_fixture_becomes_explicit_continuation_state() {
+        let response = RpcResponse::success(RequestId::Number(1), parse(INPUT_REQUIRED).unwrap());
+        let outcome = CallOutcome::from_response(&response).unwrap();
+        match outcome {
+            CallOutcome::InputRequired {
+                input_requests,
+                request_state,
+            } => {
+                assert!(input_requests.get("confirm").is_some());
+                assert_eq!(request_state, "opaque-continuation-state");
+            }
+            _ => panic!("expected input_required"),
+        }
+    }
+
+    #[test]
+    fn untrusted_tool_requires_exact_approval() {
+        let server = endpoint_config().servers.remove(0);
+        let tool = tool_page().items.remove(0);
+        let arguments = parse(r#"{"query":"one"}"#).unwrap();
+        let grant = ApprovalGrant {
+            server_id: server.id.clone(),
+            tool_name: tool.name.clone(),
+            exact_arguments: arguments.clone(),
+            expires_at_ms: 50,
+        };
+        let mut firewall = PolicyFirewall::new();
+        assert_eq!(
+            firewall.check_tool(&server, &tool, &arguments, Some(&grant), 49),
+            PolicyDecision::Allow
+        );
+        assert!(matches!(
+            firewall.check_tool(
+                &server,
+                &tool,
+                &parse(r#"{"query":"changed"}"#).unwrap(),
+                Some(&grant),
+                49
+            ),
+            PolicyDecision::ApprovalRequired { .. }
+        ));
+    }
+
+    #[test]
+    fn transport_framing_has_mandatory_routing_headers() {
+        let config = endpoint_config();
+        let metadata = RequestMetadata::modern(ClientIdentity::genos());
+        let request = RpcRequest::new(
+            RequestId::Number(1),
+            method::TOOLS_CALL,
+            parse(r#"{"name":"lookup","arguments":{}}"#).unwrap(),
+            &metadata,
+        );
+        let http = genos_mcp::transport::build_http_request(
+            &config.servers[0],
+            &request,
+            &[Header::sensitive("Authorization", "Bearer hidden")],
+        )
+        .unwrap();
+        assert_eq!(http.header("Mcp-Method"), Some("tools/call"));
+        assert_eq!(http.header("Mcp-Name"), Some("lookup"));
+        assert_eq!(
+            http.header("MCP-Protocol-Version"),
+            Some(LATEST_PROTOCOL_VERSION)
+        );
+        assert!(http.headers.iter().find(|header| header.name == "Authorization")
+            .unwrap().sensitive);
+    }
+
+    #[test]
+    fn transport_refuses_cleartext_non_loopback_endpoint() {
+        let mut config = endpoint_config();
+        config.servers[0].endpoint = "http://records.example/mcp".into();
+        let request = RpcRequest::discover(
+            RequestId::Number(1),
+            &RequestMetadata::modern(ClientIdentity::genos()),
+        );
+        let error = genos_mcp::transport::build_http_request(
+            &config.servers[0],
+            &request,
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, TransportErrorKind::InsecureEndpoint);
+    }
+
+    struct MockTransport;
+
+    impl HttpTransport for MockTransport {
+        fn send(&mut self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
+            let incoming = RpcRequest::from_json(
+                &parse(std::str::from_utf8(&request.body).unwrap()).unwrap(),
+            )
+            .unwrap();
+            Ok(HttpResponse {
+                status: 200,
+                headers: vec![Header::public("Content-Type", "application/json")],
+                body: RpcResponse::success(
+                    incoming.id,
+                    parse(r#"{"resultType":"complete","tools":[]}"#).unwrap(),
+                )
+                .to_json()
+                .to_json_string()
+                .into_bytes(),
+            })
+        }
+    }
+
+    #[test]
+    fn abstract_transport_can_be_replaced_without_protocol_changes() {
+        let config = endpoint_config();
+        let request = RpcRequest::new(
+            RequestId::Number(3),
+            method::TOOLS_LIST,
+            parse("{}").unwrap(),
+            &RequestMetadata::modern(ClientIdentity::genos()),
+        );
+        let mut client = McpHttpClient::new(MockTransport);
+        let response = client.exchange(&config.servers[0], &request, &[]).unwrap();
+        assert!(response.result.unwrap().get("tools").is_some());
+    }
+
+    struct EmptyService;
+
+    impl McpService for EmptyService {
+        fn info(&self) -> ServerInfo {
+            ServerInfo {
+                name: "genos".into(),
+                version: "1".into(),
+                title: None,
+            }
+        }
+
+        fn capabilities(&self) -> ServerCapabilities {
+            ServerCapabilities {
+                tools: true,
+                resources: false,
+                prompts: false,
+            }
+        }
+
+        fn call_tool(&mut self, _: &str, _: &JsonValue) -> Result<JsonValue, McpError> {
+            Err(McpError::method_not_found("unknown"))
+        }
+
+        fn read_resource(&mut self, _: &str) -> Result<JsonValue, McpError> {
+            Err(McpError::method_not_found(method::RESOURCES_READ))
+        }
+
+        fn get_prompt(&mut self, _: &str, _: &JsonValue) -> Result<JsonValue, McpError> {
+            Err(McpError::method_not_found(method::PROMPTS_GET))
+        }
+    }
+
+    #[test]
+    fn server_router_validates_headers_before_dispatch() {
+        let request = RpcRequest::discover(
+            RequestId::Number(1),
+            &RequestMetadata::modern(ClientIdentity::genos()),
+        );
+        let mut routing = RoutingMetadata::from_request(&request);
+        routing.method = method::TOOLS_CALL.into();
+        let response = McpServer::new(EmptyService).handle(request, &routing);
+        assert_eq!(response.error.unwrap().code, McpError::INVALID_REQUEST);
+    }
+
+    #[test]
+    fn generic_tool_registry_exposes_platform_not_vendors() {
+        let registry = genos_tools::protocol::ToolRegistry::default_registry();
+        for name in [
+            "mcp.servers",
+            "mcp.connect",
+            "mcp.tools",
+            "mcp.call",
+            "mcp.resource",
+            "mcp.prompt",
+        ] {
+            assert!(registry.find(name).is_some(), "missing {name}");
+        }
+        assert!(registry.find("mcp.github").is_none());
+        assert!(registry.find("mcp.slack").is_none());
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────
 // 1. JSON PARSER  — full protocol contract
 // ──────────────────────────────────────────────────────────────────
 #[cfg(test)]

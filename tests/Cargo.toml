@@ -11,4 +11,5 @@ edition = "2021"
 [dependencies]
 genos-hal = { path = "../genos-hal", features = ["hosted"] }
 genos-kernel = { path = "../genos-kernel", features = ["std"] }
+genos-mcp = { path = "../genos-mcp", features = ["hosted"] }
 genos-tools = { path = "../genos-tools", features = ["hosted"] }
