@@ -42,8 +42,9 @@ UEFI HTTP. Local and legacy stdio servers use the loopback-only companion bridge
 an isolated client, namespaced catalog, credential reference, trust level, limits, exact-call
 consent, output provenance, and redacted audit events.
 
-Start with [the MCP quickstart](docs/MCP_QUICKSTART.md), then see the
-[architecture and threat model](docs/MCP_ARCHITECTURE.md).
+Start with [the MCP quickstart](docs/MCP_QUICKSTART.md), use the
+[configuration and compatibility reference](docs/MCP_CONFIGURATION.md) for exact support details,
+then see the [architecture and threat model](docs/MCP_ARCHITECTURE.md).
 
 ---
 

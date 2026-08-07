@@ -133,6 +133,8 @@ authorize another.
 
 For protocol rationale, component boundaries, and the threat model, see
 [`MCP_ARCHITECTURE.md`](MCP_ARCHITECTURE.md).
+For every configuration key, compatibility boundary, and adapter extension point, see
+[`MCP_CONFIGURATION.md`](MCP_CONFIGURATION.md).
 
 For development, `make test-mcp` runs the MCP core and bridge structural suites without contacting
 or requiring credentials for a third-party server.
