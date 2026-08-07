@@ -40,7 +40,7 @@ impl RequestId {
     pub fn from_json(value: &JsonValue) -> Option<Self> {
         match value {
             JsonValue::Str(value) => Some(Self::String(value.clone())),
-            JsonValue::Number(value) if value.is_finite() && value.fract() == 0.0 => {
+            JsonValue::Number(value) if value.is_finite() && *value == (*value as i64) as f64 => {
                 Some(Self::Number(*value as i64))
             }
             _ => None,

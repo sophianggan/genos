@@ -118,6 +118,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "genos-mcp"
+version = "0.1.0"
+dependencies = [
+ "genos-kernel",
+]
+
+[[package]]
 name = "genos-tests"
 version = "0.1.0"
 dependencies = [
@@ -132,6 +139,7 @@ version = "0.1.0"
 dependencies = [
  "genos-hal",
  "genos-kernel",
+ "genos-mcp",
 ]
 
 [[package]]
