@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod execution;
 pub mod primitives;
+pub mod security;
 pub mod server;
 pub mod transport;
 pub mod wire;
@@ -21,6 +22,10 @@ pub use execution::{CallOutcome, Content, Continuation, ListKind, McpHostError, 
 pub use primitives::{
     CacheScope, Catalog, Page, PrimitiveError, Prompt, PromptArgument, Resource, ServerCatalog,
     Tool,
+};
+pub use security::{
+    resolve_auth, ApprovalGrant, AuditEvent, AuditLog, CredentialError, CredentialResolver,
+    GuardedResult, PolicyDecision, PolicyFirewall, Provenance, ResolvedAuth, Secret,
 };
 pub use server::{McpServer, McpService, RoutingMetadata, ServerCapabilities, ServerInfo};
 pub use transport::{
