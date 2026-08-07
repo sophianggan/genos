@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod execution;
 pub mod primitives;
+pub mod server;
 pub mod transport;
 pub mod wire;
 
@@ -21,6 +22,7 @@ pub use primitives::{
     CacheScope, Catalog, Page, PrimitiveError, Prompt, PromptArgument, Resource, ServerCatalog,
     Tool,
 };
+pub use server::{McpServer, McpService, RoutingMetadata, ServerCapabilities, ServerInfo};
 pub use transport::{
     Header, HttpRequest, HttpResponse, HttpTransport, McpHttpClient, TransportError,
     TransportErrorKind,

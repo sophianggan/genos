@@ -34,6 +34,28 @@ impl Tool {
             annotations: value.get("annotations").cloned(),
         })
     }
+
+    pub fn to_json(&self) -> JsonValue {
+        let mut values = BTreeMap::new();
+        values.insert(String::from("name"), JsonValue::Str(self.name.clone()));
+        if let Some(title) = &self.title {
+            values.insert(String::from("title"), JsonValue::Str(title.clone()));
+        }
+        if let Some(description) = &self.description {
+            values.insert(
+                String::from("description"),
+                JsonValue::Str(description.clone()),
+            );
+        }
+        values.insert(String::from("inputSchema"), self.input_schema.clone());
+        if let Some(output_schema) = &self.output_schema {
+            values.insert(String::from("outputSchema"), output_schema.clone());
+        }
+        if let Some(annotations) = &self.annotations {
+            values.insert(String::from("annotations"), annotations.clone());
+        }
+        JsonValue::Object(values)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +76,25 @@ impl Resource {
             description: optional_string(value, "description")?,
             mime_type: optional_string(value, "mimeType")?,
         })
+    }
+
+    pub fn to_json(&self) -> JsonValue {
+        let mut values = BTreeMap::new();
+        values.insert(String::from("uri"), JsonValue::Str(self.uri.clone()));
+        values.insert(String::from("name"), JsonValue::Str(self.name.clone()));
+        if let Some(title) = &self.title {
+            values.insert(String::from("title"), JsonValue::Str(title.clone()));
+        }
+        if let Some(description) = &self.description {
+            values.insert(
+                String::from("description"),
+                JsonValue::Str(description.clone()),
+            );
+        }
+        if let Some(mime_type) = &self.mime_type {
+            values.insert(String::from("mimeType"), JsonValue::Str(mime_type.clone()));
+        }
+        JsonValue::Object(values)
     }
 }
 
@@ -101,6 +142,40 @@ impl Prompt {
             description: optional_string(value, "description")?,
             arguments,
         })
+    }
+
+    pub fn to_json(&self) -> JsonValue {
+        let mut values = BTreeMap::new();
+        values.insert(String::from("name"), JsonValue::Str(self.name.clone()));
+        if let Some(title) = &self.title {
+            values.insert(String::from("title"), JsonValue::Str(title.clone()));
+        }
+        if let Some(description) = &self.description {
+            values.insert(
+                String::from("description"),
+                JsonValue::Str(description.clone()),
+            );
+        }
+        if !self.arguments.is_empty() {
+            let arguments = self
+                .arguments
+                .iter()
+                .map(|argument| {
+                    let mut value = BTreeMap::new();
+                    value.insert(String::from("name"), JsonValue::Str(argument.name.clone()));
+                    if let Some(description) = &argument.description {
+                        value.insert(
+                            String::from("description"),
+                            JsonValue::Str(description.clone()),
+                        );
+                    }
+                    value.insert(String::from("required"), JsonValue::Bool(argument.required));
+                    JsonValue::Object(value)
+                })
+                .collect();
+            values.insert(String::from("arguments"), JsonValue::Array(arguments));
+        }
+        JsonValue::Object(values)
     }
 }
 
