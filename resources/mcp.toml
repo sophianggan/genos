@@ -1,0 +1,37 @@
+# GenOS MCP endpoints. This file is safe to commit: it contains credential
+# references, never tokens. Copy it to \system\mcp.toml on the EFI partition.
+
+[defaults]
+timeout_ms = 15000
+max_response_bytes = 1048576
+require_approval = true
+
+# Add any remote MCP server by URL. Provision SEARCH_MCP_TOKEN in the hosted
+# bridge environment, or change credential_ref to a file/oauth/firmware source.
+[[servers]]
+id = "example-search"
+transport = "streamable_http"
+endpoint = "https://mcp.example.com/mcp"
+enabled = false
+auth = "bearer"
+credential_ref = "env:SEARCH_MCP_TOKEN"
+trust = "untrusted"
+allow_tools = true
+allow_resources = true
+allow_prompts = true
+require_approval = true
+allowed_tools = []
+
+# Bare-metal GenOS cannot launch a local stdio process. A companion bridge can
+# launch it and expose Streamable HTTP on loopback or an isolated LAN.
+[[servers]]
+id = "example-stdio"
+transport = "stdio_bridge"
+endpoint = "http://127.0.0.1:8787/mcp"
+enabled = false
+auth = "none"
+trust = "read_only"
+allow_tools = true
+allow_resources = true
+allow_prompts = true
+require_approval = true
