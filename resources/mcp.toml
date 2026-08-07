@@ -6,15 +6,16 @@ timeout_ms = 15000
 max_response_bytes = 1048576
 require_approval = true
 
-# Add any remote MCP server by URL. Provision SEARCH_MCP_TOKEN in the hosted
-# bridge environment, or change credential_ref to a file/oauth/firmware source.
+# Add any modern remote MCP server by URL. Bare-metal GenOS currently resolves
+# file credentials; env/oauth/firmware references fail closed without a hosted
+# or hardware credential provider.
 [[servers]]
 id = "example-search"
 transport = "streamable_http"
 endpoint = "https://mcp.example.com/mcp"
 enabled = false
 auth = "bearer"
-credential_ref = "env:SEARCH_MCP_TOKEN"
+credential_ref = "file:\secrets\search.token"
 trust = "untrusted"
 allow_tools = true
 allow_resources = true
@@ -22,8 +23,9 @@ allow_prompts = true
 require_approval = true
 allowed_tools = []
 
-# Bare-metal GenOS cannot launch a local stdio process. A companion bridge can
-# launch it and expose Streamable HTTP on loopback or an isolated LAN.
+# Bare-metal GenOS cannot launch a local stdio process. The companion bridge
+# launches modern or legacy stdio servers on host loopback. Reach it from a VM
+# or physical machine through an authenticated HTTPS reverse proxy.
 [[servers]]
 id = "example-stdio"
 transport = "stdio_bridge"

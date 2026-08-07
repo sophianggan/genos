@@ -2183,7 +2183,6 @@ And also check the tool handlers.
 mod test_gemma4_forward {
     use genos_kernel::gemma4::Gemma4Model;
     use genos_kernel::gguf::GGUFFile;
-    use genos_kernel::sampler::Sampler;
     use genos_kernel::tokenizer::Tokenizer;
 
     fn model_path() -> std::path::PathBuf {

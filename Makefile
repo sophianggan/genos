@@ -34,7 +34,7 @@ OVMF_CODE ?= $(shell \
 # This is slower than native but fully functional for UEFI development and testing.
 # Install with: brew install qemu  (brings OVMF firmware automatically)
 
-.PHONY: build build-debug bridge-build bridge-test esp esp-img qemu qemu-debug qemu-net qemu-nographic clean help setup-model
+.PHONY: build build-debug bridge-build bridge-test test-mcp esp esp-img qemu qemu-debug qemu-net qemu-nographic clean help setup-model
 
 # build-std flags: required to compile core/alloc from source for the UEFI target.
 # These are passed explicitly here (not in .cargo/config.toml) so they don't
@@ -55,6 +55,11 @@ bridge-build:
 
 ## Run structural tests for the hosted MCP companion.
 bridge-test:
+	$(CARGO) test --manifest-path bridge/Cargo.toml --target $(HOST_TARGET)
+
+## Run MCP core and bridge structural tests.
+test-mcp:
+	$(CARGO) test -p genos-mcp --features hosted --target $(HOST_TARGET)
 	$(CARGO) test --manifest-path bridge/Cargo.toml --target $(HOST_TARGET)
 
 ## Create the ESP (EFI System Partition) directory structure
@@ -221,6 +226,7 @@ help:
 	@echo "  make esp            - Create ESP directory with binary + palace"
 	@echo "  make bridge-build   - Build the hosted MCP stdio bridge"
 	@echo "  make bridge-test    - Test the hosted MCP stdio bridge"
+	@echo "  make test-mcp       - Run MCP core + bridge structural tests"
 	@echo "  make setup-model    - Download Stories15M model + tokenizer"
 	@echo "  make qemu           - Run in QEMU (graphical, no network)"
 	@echo "  make qemu-net       - Run in QEMU with networking (Phase B)"

@@ -20,17 +20,30 @@ It schedules work, decides what to read and write to disk, browses the web, reme
 
 ## Architecture
 
-Five Rust crates in a workspace, each with zero overlap:
+Six Rust crates in the UEFI workspace plus one hosted companion, each with a narrow boundary:
 
 ```
 genos-boot    UEFI entry point, init, panic handler
 genos-hal     Hardware abstraction (screen, keyboard, disk, net, timers)
 genos-kernel  LLM runtime — model loading, inference, tokenizer, sampler, tool protocol
+genos-mcp     Provider-neutral MCP wire model, clients, server, policy, catalogs
 genos-tools   Concrete tools: filesystem, web, memory, code, media
 genos-agent   REPL shell, task scheduler, policy engine
+bridge/       Hosted stdio/legacy MCP adapter (separate workspace)
 ```
 
 The separation means `genos-kernel` has no dependency on UEFI at all — it compiles and tests on your host machine.
+
+### MCP platform
+
+GenOS can discover and use tools, resources, and prompts from arbitrary MCP servers configured in
+`\system\mcp.toml`. Modern Streamable HTTP endpoints connect directly through hosted sockets or
+UEFI HTTP. Local and legacy stdio servers use the loopback-only companion bridge. Every server has
+an isolated client, namespaced catalog, credential reference, trust level, limits, exact-call
+consent, output provenance, and redacted audit events.
+
+Start with [the MCP quickstart](docs/MCP_QUICKSTART.md), then see the
+[architecture and threat model](docs/MCP_ARCHITECTURE.md).
 
 ---
 
@@ -46,7 +59,7 @@ The separation means `genos-kernel` has no dependency on UEFI at all — it comp
 
 Phases A through D are done. The kernel now includes both the original Stories15M Llama 2 runtime and the full Gemma 4 E2B forward pass with TurboQuant quantization.
 
-**Test status**: 23 kernel unit tests + 86 integration tests = **109 tests passing**.
+**Test status**: 107 integration + 26 kernel + 19 MCP-core + 6 bridge tests = **158 tests passing**.
 
 Phase D additions (~1,770 LOC across 4 new files + 2 modified):
 - `gguf.rs` — GGUF v3 parser (metadata, tensor info, aligned data extraction)
@@ -79,7 +92,7 @@ Boot → heap → screen/keyboard/disk HAL → full Llama 2 forward pass (RMSNor
 ### Phase B — OS Kernel Layer
 
 Turn the prototype into a real OS environment:
-- HTTP client on UEFI's `EFI_HTTP_PROTOCOL` (no TLS needed yet)
+- HTTP client on UEFI's `EFI_HTTP_PROTOCOL`, with firmware HTTPS where available
 - JSON tool-call protocol: `{"tool": "fs.read", "args": {"path": "..."}}`
 - System prompt: tells the model it IS the OS, lists available tools, enforces JSON output
 - Tool executor: `fs.read`, `fs.write`, `fs.list`, `net.fetch`
@@ -112,6 +125,8 @@ Replace Stories15M with a real instruction-following model:
 
 ### Phase E — Agentic Environment
 
+- Provider-neutral MCP host/client/server foundation: dynamic discovery, tools, resources,
+  prompts, stateless Streamable HTTP, legacy stdio bridge, policy firewall, and human consent
 - `research.run(topic, depth)` — long-lived loop: search → read → summarize → store results in `\research\`
 - Cooperative task scheduler: REPL + research jobs + memory consolidation run interleaved (no preemption)
 - Tool builder: LLM designs new tools, user approves, stored as JSON dispatch configs
@@ -128,6 +143,8 @@ Replace Stories15M with a real instruction-following model:
 /models/tokenizer.bin      BPE tokenizer
 /system/prompt.txt         system prompt (editable)
 /system/config.toml        sampling params, model selection
+/system/mcp.toml           provider-neutral MCP endpoint registry
+/secrets/                  referenced MCP credentials (never committed)
 /memory/store.jsonl        persistent memory entries
 /logs/journal.jsonl        conversation log
 /research/                 auto-research outputs
@@ -154,7 +171,7 @@ sudo apt install qemu-system-x86 ovmf
 ### Build
 
 ```bash
-git clone https://github.com/n33levo/genos
+git clone https://github.com/sophianggan/genos
 cd genos
 make build
 ```
@@ -232,7 +249,7 @@ The inference engine in `genos-kernel/src/inference.rs` implements the standard 
 
 No GPU support — CPU-only with SIMD acceleration (AVX2). GPU drivers from firmware would be an enormous scope increase. The Gemma 4 E2B at int4 is designed to run on phones, so modern CPU performance is workable.
 
-No TLS/HTTPS — the UEFI HTTP Boot protocol handles plain HTTP natively. Adding TLS would bloat the binary by 2-5 MB and add significant complexity. HTTP-only for now, with llms.txt-aware fetching for developer-friendly sites.
+HTTPS is available through the hosted platform TLS stack and through firmware that implements UEFI HTTPS. Certificate validation on bare metal follows the firmware trust store and therefore varies by machine; authenticated remote MCP endpoints fail closed unless their URL is HTTPS.
 
 Cooperative multitasking only — no interrupts, no preemption. Tasks yield voluntarily between token generation steps. Simple and correct for a single-user environment.
 

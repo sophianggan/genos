@@ -85,10 +85,12 @@ The direct adapter emits one HTTP POST per JSON-RPC request. Modern requests inc
 `MCP-Protocol-Version`, `Mcp-Method`, and, when applicable, `Mcp-Name`. HTTPS is mandatory for
 non-loopback authenticated endpoints. Redirects may not change origins while carrying a secret.
 
-Bare-metal UEFI currently has an incomplete TCP layer and no production TLS verifier. Until both
-exist, remote production connections use the hosted bridge on a user-controlled machine. The
-bridge terminates TLS or launches stdio servers, then presents a narrow HTTP MCP endpoint to GenOS.
-This is an explicit deployment boundary, not a claim that plaintext HTTP is safe.
+Bare-metal GenOS uses the UEFI HTTP service binding directly, including caller-provided MCP and
+authorization headers. HTTPS availability and certificate validation inherit the machine's
+firmware implementation and trust store. Where firmware networking is absent or unsuitable, a
+hosted reverse proxy terminates TLS and the companion bridge launches stdio servers behind a
+narrow HTTP MCP endpoint. This is an explicit deployment boundary, not a claim that plaintext
+HTTP is safe.
 
 Custom transports can be added by implementing the same request/response trait. This is how GenOS
 can support stdio, in-memory test transports, serial links, or future MCP transports without
@@ -245,6 +247,6 @@ Security research:
 Positive consequences are broad interoperability, testable boundaries, no dependency on a vendor
 catalog, and a security decision point outside the model. Costs are a new protocol crate, a bridge
 for capabilities unavailable in UEFI, and explicit compatibility code for older servers. Full
-production readiness still requires a real UEFI network driver, TLS certificate validation,
-secure credential storage, OAuth UI, and conformance/fuzz testing; this foundation makes those
-increments possible without redesigning the agent.
+production hardening still requires verified behavior across firmware HTTP implementations,
+hardware-backed credential storage, an OAuth authorization UI, and conformance/fuzz testing; this
+foundation makes those increments possible without redesigning the agent.

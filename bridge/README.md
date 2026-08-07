@@ -1,8 +1,11 @@
 # GenOS MCP bridge
 
-The bridge makes local stdio MCP servers available to a hosted GenOS process
-through the same Streamable HTTP boundary used by remote servers. GenOS cannot
-launch child processes on UEFI, so this companion runs on a conventional host.
+The bridge makes local stdio MCP servers available through the same Streamable
+HTTP boundary used by remote servers. GenOS cannot launch child processes on
+UEFI, so this companion runs on a conventional host. It automatically adapts
+the legacy initialize/initialized lifecycle used by existing stdio servers to
+GenOS's stateless MCP `2026-07-28` client contract; modern stdio servers pass
+through without translation.
 
 Build and run it with any stdio MCP server command:
 
@@ -13,7 +16,7 @@ cargo run --manifest-path bridge/Cargo.toml \
   npx -y @modelcontextprotocol/server-filesystem /path/to/allowed/files
 ```
 
-Then configure GenOS:
+For a hosted GenOS process, configure:
 
 ```toml
 [[servers]]
@@ -25,9 +28,10 @@ trust = "read_only"
 require_approval = true
 ```
 
-The built-in listener only binds loopback. For a VM, another machine, or real
-bare-metal GenOS, put the bridge behind a mutually authenticated TLS reverse
-proxy and use an `https://` endpoint. Do not expose its plaintext port to a LAN.
+The built-in listener only binds loopback. A VM or bare-metal machine cannot
+reach the host's `127.0.0.1`; put the bridge behind a mutually authenticated TLS
+reverse proxy and use that proxy's `https://` endpoint. Do not expose the
+bridge's plaintext port to a LAN.
 Credentials for the child server should be passed through that process's
 environment; the bridge never converts HTTP authorization headers into child
 environment variables.
