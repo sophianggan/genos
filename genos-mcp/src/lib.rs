@@ -3,12 +3,17 @@
 extern crate alloc;
 
 pub mod config;
+pub mod primitives;
 pub mod transport;
 pub mod wire;
 
 pub use config::{
     AuthConfig, ConfigError, CredentialRef, McpConfig, McpDefaults, ServerConfig, TransportKind,
     TrustLevel,
+};
+pub use primitives::{
+    CacheScope, Catalog, Page, PrimitiveError, Prompt, PromptArgument, Resource, ServerCatalog,
+    Tool,
 };
 pub use transport::{
     Header, HttpRequest, HttpResponse, HttpTransport, McpHttpClient, TransportError,
