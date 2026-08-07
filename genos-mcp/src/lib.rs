@@ -4,6 +4,7 @@ extern crate alloc;
 
 pub mod client;
 pub mod config;
+pub mod execution;
 pub mod primitives;
 pub mod transport;
 pub mod wire;
@@ -15,6 +16,7 @@ pub use config::{
     AuthConfig, ConfigError, CredentialRef, McpConfig, McpDefaults, ServerConfig, TransportKind,
     TrustLevel,
 };
+pub use execution::{CallOutcome, Content, Continuation, ListKind, McpHostError, ToolInvocation};
 pub use primitives::{
     CacheScope, Catalog, Page, PrimitiveError, Prompt, PromptArgument, Resource, ServerCatalog,
     Tool,
