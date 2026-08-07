@@ -66,6 +66,9 @@ esp: build
 	@if [ -f resources/config.toml ] && [ ! -f $(ESP_DIR)/system/config.toml ]; then \
 		cp resources/config.toml $(ESP_DIR)/system/config.toml; \
 	fi
+	@if [ -f resources/mcp.toml ] && [ ! -f $(ESP_DIR)/system/mcp.toml ]; then \
+		cp resources/mcp.toml $(ESP_DIR)/system/mcp.toml; \
+	fi
 	@if [ ! -f $(ESP_DIR)/palace/facts.kv ]; then \
 		cp resources/facts.kv $(ESP_DIR)/palace/facts.kv 2>/dev/null || \
 		echo "os_version = genos v0.1.0" > $(ESP_DIR)/palace/facts.kv; \

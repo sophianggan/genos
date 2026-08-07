@@ -14,6 +14,7 @@ use genos_tools::graph::EntityGraph;
 use genos_tools::search::SearchIndex;
 use crate::compact::ContextHistory;
 use crate::consolidate::Consolidator;
+use crate::mcp::McpRuntime;
 use crate::policy::PolicyEngine;
 use crate::tools;
 use crate::wakeup;
@@ -83,10 +84,12 @@ impl<'a> Repl<'a> {
         let mut entity_graph = EntityGraph::new();
         entity_graph.load();
         let mut consolidator = Consolidator::new();
+        let mut mcp = McpRuntime::load(&session_id);
         let mut input_history = keyboard::InputHistory::new(10);
 
         screen::println("");
         screen::println("genos v0.1.0 — bare-metal LLM operating system");
+        screen::println(&format!("MCP host: {} configured server(s)", mcp.server_count()));
         screen::println("Type a prompt and press Enter. Type 'exit' to shut down.");
         screen::println("");
 
@@ -190,9 +193,18 @@ impl<'a> Repl<'a> {
 
                     // Reset per-turn policy counts at first tool call
                     policy.reset_turn();
+                    mcp.reset_turn();
 
                     // Execute
-                    let result = tools::execute(&tc, &mut policy, &timestamp, state.turn, &mut search_index, &mut entity_graph);
+                    let result = tools::execute(
+                        &tc,
+                        &mut policy,
+                        &timestamp,
+                        state.turn,
+                        &mut search_index,
+                        &mut entity_graph,
+                        &mut mcp,
+                    );
 
                     // Display result
                     let result_summary = if result.ok {
@@ -342,6 +354,8 @@ impl<'a> Repl<'a> {
         screen::println("  Available tools:");
         screen::println("    fs.read, fs.write, fs.list, fs.delete");
         screen::println("    net.fetch");
+        screen::println("    mcp.servers, mcp.connect, mcp.tools, mcp.call");
+        screen::println("    mcp.resource, mcp.prompt");
         screen::println("    memory.facts_get, memory.facts_set");
         screen::println("    sys.clock, sys.introspect");
         screen::println("");
