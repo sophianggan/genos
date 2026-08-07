@@ -184,16 +184,15 @@ impl<'a> Repl<'a> {
                 .map(|wt| wt.iso8601())
                 .unwrap_or_else(|| String::from("unknown"));
 
+            // Budgets cover the whole model turn, including every emitted call.
+            policy.reset_turn();
+            mcp.reset_turn();
             let mut tool_results_text = String::new();
             for tc_json in &tool_calls {
                 if let Some(tc) = ToolCall::from_json(tc_json, &session_id) {
                     // Display tool call
                     let summary = tc.args.to_json_string();
                     screen::print_tool_call(&tc.tool, &summary);
-
-                    // Reset per-turn policy counts at first tool call
-                    policy.reset_turn();
-                    mcp.reset_turn();
 
                     // Execute
                     let result = tools::execute(

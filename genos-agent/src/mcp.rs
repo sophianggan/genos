@@ -2,14 +2,14 @@
 
 use alloc::format;
 use alloc::string::{String, ToString};
-use genos_hal::disk;
+use genos_hal::{disk, keyboard, screen};
 use genos_kernel::json::JsonValue;
 use genos_mcp::client::ClientStatus;
 use genos_mcp::execution::{ListKind, McpHostError};
 use genos_mcp::security::{CredentialError, CredentialResolver, Secret};
 use genos_mcp::{
-    resolve_auth, ClientManager, GuardedResult, McpConfig, McpHttpClient, PolicyDecision,
-    PolicyFirewall, Provenance,
+    resolve_auth, ApprovalGrant, ClientManager, GuardedResult, McpConfig, McpHttpClient,
+    PolicyDecision, PolicyFirewall, Provenance,
 };
 use genos_tools::mcp_transport::HalMcpTransport;
 use genos_tools::protocol::ToolResult;
@@ -165,13 +165,58 @@ impl McpRuntime {
                 )
             }
         };
-        match self
+        let decision = self
             .firewall
-            .check_tool(&server, &tool, &arguments, None, now_ms)
-        {
+            .check_tool(&server, &tool, &arguments, None, now_ms);
+        match decision {
             PolicyDecision::Allow => {}
             PolicyDecision::ApprovalRequired { reason } => {
-                return ToolResult::failure(call_id, "approval_required", &reason, false)
+                let approval =
+                    match request_exact_approval(server_id, tool_name, &arguments, &reason, now_ms)
+                    {
+                        Some(approval) => approval,
+                        None => {
+                            return ToolResult::failure(
+                                call_id,
+                                "approval_denied",
+                                "user denied the exact MCP tool call",
+                                false,
+                            )
+                        }
+                    };
+                match self
+                    .firewall
+                    .check_tool(&server, &tool, &arguments, Some(&approval), now_ms)
+                {
+                    PolicyDecision::Allow => {}
+                    PolicyDecision::Deny { reason } => {
+                        return ToolResult::failure(call_id, "policy_denied", &reason, false)
+                    }
+                    PolicyDecision::RateLimited => {
+                        return ToolResult::failure(
+                            call_id,
+                            "rate_limited",
+                            "MCP call budget exceeded",
+                            true,
+                        )
+                    }
+                    PolicyDecision::CircuitOpen => {
+                        return ToolResult::failure(
+                            call_id,
+                            "circuit_open",
+                            "MCP server circuit breaker is open",
+                            true,
+                        )
+                    }
+                    PolicyDecision::ApprovalRequired { .. } => {
+                        return ToolResult::failure(
+                            call_id,
+                            "approval_invalid",
+                            "exact-call approval did not match the pending MCP request",
+                            false,
+                        )
+                    }
+                }
             }
             PolicyDecision::Deny { reason } => {
                 return ToolResult::failure(call_id, "policy_denied", &reason, false)
@@ -411,6 +456,32 @@ impl McpRuntime {
             }
         }
     }
+}
+
+fn request_exact_approval(
+    server_id: &str,
+    tool_name: &str,
+    arguments: &JsonValue,
+    reason: &str,
+    now_ms: u64,
+) -> Option<ApprovalGrant> {
+    screen::println("");
+    screen::println("=== MCP approval required ===");
+    screen::println(&format!("Server: {}", server_id));
+    screen::println(&format!("Tool: {}", tool_name));
+    screen::println(&format!("Arguments: {}", arguments.to_json_string()));
+    screen::println(&format!("Reason: {}", reason));
+    screen::print("Approve this exact call? Type 'yes' to continue: ");
+    let answer = keyboard::read_line();
+    if answer.trim() != "yes" {
+        return None;
+    }
+    Some(ApprovalGrant {
+        server_id: server_id.to_string(),
+        tool_name: tool_name.to_string(),
+        exact_arguments: arguments.clone(),
+        expires_at_ms: now_ms.saturating_add(60_000),
+    })
 }
 
 type ErrorTuple = (&'static str, String, bool);
